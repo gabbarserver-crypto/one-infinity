@@ -44,7 +44,7 @@ export default function Masters({ call, staff }) {
 }
 
 /* ---------------- Generic list table ---------------- */
-function ListTable({ rows, columns, onEdit, onDelete, onAdd, addLabel }) {
+function ListTable({ rows, columns, onEdit, onAdd, addLabel }) {
   const [q, setQ] = useState("");
   const filteredRows = q.trim()
     ? rows.filter((r) =>
@@ -76,25 +76,48 @@ function ListTable({ rows, columns, onEdit, onDelete, onAdd, addLabel }) {
           <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-500">
             <tr>
               {columns.map((c) => <th key={c.key} className="text-left font-medium px-3 py-2">{c.label}</th>)}
-              <th className="px-3 py-2"></th>
             </tr>
           </thead>
           <tbody>
             {filteredRows.map((r) => (
               <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
-                {columns.map((c) => <td key={c.key} className="px-3 py-2 text-slate-700 dark:text-slate-300">{c.render ? c.render(r) : r[c.key]}</td>)}
-                <td className="px-3 py-2 text-right whitespace-nowrap">
-                  <GhostButton onClick={() => onEdit(r)} className="mr-2">Edit</GhostButton>
-                  <GhostButton onClick={() => onDelete(r)} className="!text-rose-500">Delete</GhostButton>
-                </td>
+                {columns.map((c, i) => {
+                  const content = c.render ? c.render(r) : r[c.key];
+                  return (
+                    <td key={c.key} className="px-3 py-2 text-slate-700 dark:text-slate-300">
+                      {i === 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => onEdit(r)}
+                          title="Click to edit"
+                          className="text-left font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          {content || "—"}
+                        </button>
+                      ) : content}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
             {filteredRows.length === 0 && (
-              <tr><td colSpan={columns.length + 1} className="text-center text-slate-400 dark:text-slate-500 py-8">{q ? "No matches" : "No records yet"}</td></tr>
+              <tr><td colSpan={columns.length} className="text-center text-slate-400 dark:text-slate-500 py-8">{q ? "No matches" : "No records yet"}</td></tr>
             )}
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+/* ---------------- Update + Delete buttons shown at the bottom of every form ---------------- */
+function FormActions({ isEdit, label, onSave, onDelete }) {
+  return (
+    <div className="flex items-center gap-3">
+      <PrimaryButton onClick={onSave}>{isEdit ? `Update ${label}` : `Save ${label}`}</PrimaryButton>
+      {isEdit && onDelete && (
+        <GhostButton onClick={onDelete} className="!text-rose-500">Delete</GhostButton>
+      )}
     </div>
   );
 }
@@ -123,8 +146,10 @@ function RTOMaster({ notify }) {
 
   const remove = async (row) => {
     if (!confirm(`Delete ${row.name}?`)) return;
-    await supabase.from("rtos").delete().eq("id", row.id);
-    notify("Deleted"); load();
+    const { error } = await supabase.from("rtos").delete().eq("id", row.id);
+    if (error) { notify("Couldn't delete: " + error.message); return; }
+    notify("Deleted");
+    setOpen(false); setEditing(null); load();
   };
 
   return (
@@ -137,15 +162,14 @@ function RTOMaster({ notify }) {
         ]}
         onAdd={() => { setEditing(null); setOpen(true); }}
         onEdit={(r) => { setEditing(r); setOpen(true); }}
-        onDelete={remove}
         addLabel="Add RTO"
       />
-      {open && <RTOForm initial={editing} onSave={save} onClose={() => setOpen(false)} />}
+      {open && <RTOForm initial={editing} onSave={save} onDelete={editing ? () => remove(editing) : undefined} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-function RTOForm({ initial, onSave, onClose }) {
+function RTOForm({ initial, onSave, onDelete, onClose }) {
   const [f, setF] = useState(initial || { name: "", code: "", type: "RTO Office", address: "", phone: "", slot_booking: true, status: "Active" });
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   return (
@@ -162,7 +186,7 @@ function RTOForm({ initial, onSave, onClose }) {
       <Field label="Status">
         <Select value={f.status} onChange={set("status")}><option>Active</option><option>Inactive</option></Select>
       </Field>
-      <PrimaryButton onClick={() => onSave(f)}>Save RTO</PrimaryButton>
+      <FormActions isEdit={!!initial} label="RTO" onSave={() => onSave(f)} onDelete={onDelete} />
     </Modal>
   );
 }
@@ -198,8 +222,10 @@ function StaffMaster({ notify, call, myStaffId }) {
 
   const remove = async (row) => {
     if (!confirm(`Delete ${row.full_name}?`)) return;
-    await supabase.from("staff").delete().eq("id", row.id);
-    notify("Deleted"); load();
+    const { error } = await supabase.from("staff").delete().eq("id", row.id);
+    if (error) { notify("Couldn't delete: " + error.message); return; }
+    notify("Deleted");
+    setOpen(false); setEditing(null); load();
   };
 
   return (
@@ -226,15 +252,14 @@ function StaffMaster({ notify, call, myStaffId }) {
         ]}
         onAdd={() => { setEditing(null); setOpen(true); }}
         onEdit={(r) => { setEditing(r); setOpen(true); }}
-        onDelete={remove}
         addLabel="Add Staff"
       />
-      {open && <StaffForm initial={editing} roles={roles} onSave={save} onClose={() => setOpen(false)} />}
+      {open && <StaffForm initial={editing} roles={roles} onSave={save} onDelete={editing ? () => remove(editing) : undefined} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-function StaffForm({ initial, roles, onSave, onClose }) {
+function StaffForm({ initial, roles, onSave, onDelete, onClose }) {
   const [f, setF] = useState(initial || {
     full_name: "", role: "", role_id: "", mobile: "", email: "", joining_date: "",
     username: "", grant_app_access: true, allow_ledger_view: true,
@@ -262,7 +287,7 @@ function StaffForm({ initial, roles, onSave, onClose }) {
       <Field label="Email"><Input type="email" value={f.email} onChange={set("email")} /></Field>
       <Field label="Joining Date"><Input type="date" value={f.joining_date || ""} onChange={set("joining_date")} /></Field>
       <Field label="Username"><Input value={f.username} onChange={set("username")} /></Field>
-      <PrimaryButton onClick={() => onSave(f)}>Save Staff</PrimaryButton>
+      <FormActions isEdit={!!initial} label="Staff" onSave={() => onSave(f)} onDelete={onDelete} />
 
       {initial && (
         <div className="mt-5 pt-4 border-t border-slate-200 dark:border-slate-800">
@@ -329,8 +354,10 @@ function ServiceMaster({ notify }) {
 
   const remove = async (row) => {
     if (!confirm(`Delete ${row.parent_service}?`)) return;
-    await supabase.from("services").delete().eq("id", row.id);
-    notify("Deleted"); load();
+    const { error } = await supabase.from("services").delete().eq("id", row.id);
+    if (error) { notify("Couldn't delete: " + error.message); return; }
+    notify("Deleted");
+    setOpen(false); setEditing(null); load();
   };
 
   return (
@@ -343,15 +370,14 @@ function ServiceMaster({ notify }) {
         ]}
         onAdd={() => { setEditing(null); setOpen(true); }}
         onEdit={(r) => { setEditing(r); setOpen(true); }}
-        onDelete={remove}
         addLabel="Add Service"
       />
-      {open && <ServiceForm initial={editing} allServices={rows} onSave={save} onClose={() => setOpen(false)} />}
+      {open && <ServiceForm initial={editing} allServices={rows} onSave={save} onDelete={editing ? () => remove(editing) : undefined} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-function ServiceForm({ initial, allServices = [], onSave, onClose }) {
+function ServiceForm({ initial, allServices = [], onSave, onDelete, onClose }) {
   const [f, setF] = useState(initial || {
     parent_service: "", short_name: "", pcc_required: true, slot_booking_required: true,
     rto_required: false, agency_required: false, previous_ll_required: false, otp_required: false, chat_in_app: false,
@@ -482,7 +508,7 @@ function ServiceForm({ initial, allServices = [], onSave, onClose }) {
         </div>
       </div>
       <div className="mt-5">
-        <PrimaryButton onClick={() => onSave(f, documents)}>Save Service</PrimaryButton>
+        <FormActions isEdit={!!initial} label="Service" onSave={() => onSave(f, documents)} onDelete={onDelete} />
       </div>
     </Modal>
   );
@@ -532,8 +558,10 @@ function DealerMaster({ notify, call }) {
 
   const remove = async (row) => {
     if (!confirm(`Delete ${row.name}?`)) return;
-    await supabase.from("dealers").delete().eq("id", row.id);
-    notify("Deleted"); load();
+    const { error } = await supabase.from("dealers").delete().eq("id", row.id);
+    if (error) { notify("Couldn't delete: " + error.message); return; }
+    notify("Deleted");
+    setOpen(false); setEditing(null); load();
   };
 
   return (
@@ -588,10 +616,9 @@ function DealerMaster({ notify, call }) {
         ]}
         onAdd={() => { setEditing(null); setOpen(true); }}
         onEdit={(r) => { setEditing(r); setOpen(true); }}
-        onDelete={remove}
         addLabel="Add Dealer"
       />
-      {open && <DealerForm initial={editing} onSave={save} onClose={() => setOpen(false)} call={call} />}
+      {open && <DealerForm initial={editing} onSave={save} onDelete={editing ? () => remove(editing) : undefined} onClose={() => setOpen(false)} call={call} />}
       {chatDealer && (
         <ApplicationChatModal
           dealerId={chatDealer.id}
@@ -605,7 +632,7 @@ function DealerMaster({ notify, call }) {
   );
 }
 
-export function DealerForm({ initial, onSave, onClose, call }) {
+export function DealerForm({ initial, onSave, onDelete, onClose, call }) {
   const [f, setF] = useState(initial || { name: "", code: "", short_name: "", contact_name: "", mobile: "", email: "", address: "", city: "", state: "", pincode: "", credit_limit: "", opening_balance: "" });
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const [loginEmail, setLoginEmail] = useState("");
@@ -648,7 +675,7 @@ export function DealerForm({ initial, onSave, onClose, call }) {
         <Field label="Credit Limit (₹)"><Input type="number" value={f.credit_limit} onChange={set("credit_limit")} /></Field>
         <Field label="Opening Balance (₹)"><Input type="number" value={f.opening_balance} onChange={set("opening_balance")} /></Field>
       </div>
-      <PrimaryButton onClick={() => onSave(f)}>Save Dealer</PrimaryButton>
+      <FormActions isEdit={!!initial} label="Dealer" onSave={() => onSave(f)} onDelete={onDelete} />
 
       {initial && (
         <div className="mt-5 pt-4 border-t border-slate-200 dark:border-slate-800">
@@ -799,8 +826,10 @@ function AgencyMaster({ notify }) {
 
   const remove = async (row) => {
     if (!confirm(`Delete ${row.name}?`)) return;
-    await supabase.from("agencies").delete().eq("id", row.id);
-    notify("Deleted"); load();
+    const { error } = await supabase.from("agencies").delete().eq("id", row.id);
+    if (error) { notify("Couldn't delete: " + error.message); return; }
+    notify("Deleted");
+    setOpen(false); setEditing(null); load();
   };
 
   return (
@@ -813,15 +842,14 @@ function AgencyMaster({ notify }) {
         ]}
         onAdd={() => { setEditing(null); setOpen(true); }}
         onEdit={(r) => { setEditing(r); setOpen(true); }}
-        onDelete={remove}
         addLabel="Add Agency"
       />
-      {open && <AgencyForm initial={editing} onSave={save} onClose={() => setOpen(false)} />}
+      {open && <AgencyForm initial={editing} onSave={save} onDelete={editing ? () => remove(editing) : undefined} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-export function AgencyForm({ initial, onSave, onClose }) {
+export function AgencyForm({ initial, onSave, onDelete, onClose }) {
   const [f, setF] = useState(initial || { name: "", code: "", contact_person: "", mobile: "", status: "Active", opening_balance: "", default_processing_charges: "", payment_terms: "7 Days" });
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   return (
@@ -844,7 +872,7 @@ export function AgencyForm({ initial, onSave, onClose }) {
           <option>7 Days</option><option>15 Days</option><option>30 Days</option><option>Immediate</option>
         </Select>
       </Field>
-      <PrimaryButton onClick={() => onSave(f)}>Save Agency</PrimaryButton>
+      <FormActions isEdit={!!initial} label="Agency" onSave={() => onSave(f)} onDelete={onDelete} />
     </Modal>
   );
 }
