@@ -592,6 +592,9 @@ function SundryHead({ title, subtitle, entityMode, table, balancesTable, balance
           address: form.address, city: form.city, state: form.state, pincode: form.pincode,
           credit_limit: parseFloat(form.credit_limit) || 0,
           opening_balance: parseFloat(form.opening_balance) || 0,
+          ...(form.visible_from_year !== undefined && {
+            visible_from_year: form.visible_from_year === "" || form.visible_from_year === null ? null : parseInt(form.visible_from_year, 10),
+          }),
         }
       : {
           name: form.name, code: form.code, contact_person: form.contact_person, mobile: form.mobile, status: form.status,

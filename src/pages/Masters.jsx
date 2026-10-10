@@ -547,6 +547,7 @@ function DealerMaster({ notify, call }) {
       address: form.address, city: form.city, state: form.state, pincode: form.pincode,
       credit_limit: parseFloat(form.credit_limit) || 0,
       opening_balance: parseFloat(form.opening_balance) || 0,
+      visible_from_year: form.visible_from_year === "" || form.visible_from_year == null ? null : parseInt(form.visible_from_year, 10),
     };
     const { error } = editing
       ? await supabase.from("dealers").update(payload).eq("id", editing.id)
@@ -633,8 +634,9 @@ function DealerMaster({ notify, call }) {
 }
 
 export function DealerForm({ initial, onSave, onDelete, onClose, call }) {
-  const [f, setF] = useState(initial || { name: "", code: "", short_name: "", contact_name: "", mobile: "", email: "", address: "", city: "", state: "", pincode: "", credit_limit: "", opening_balance: "" });
+  const [f, setF] = useState(initial || { name: "", code: "", short_name: "", contact_name: "", mobile: "", email: "", address: "", city: "", state: "", pincode: "", credit_limit: "", opening_balance: "", visible_from_year: "" });
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const thisYear = new Date().getFullYear();
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [creatingLogin, setCreatingLogin] = useState(false);
@@ -675,6 +677,15 @@ export function DealerForm({ initial, onSave, onDelete, onClose, call }) {
         <Field label="Credit Limit (₹)"><Input type="number" value={f.credit_limit} onChange={set("credit_limit")} /></Field>
         <Field label="Opening Balance (₹)"><Input type="number" value={f.opening_balance} onChange={set("opening_balance")} /></Field>
       </div>
+      <Field label="Data visible to dealer">
+        <Select value={f.visible_from_year ?? ""} onChange={set("visible_from_year")}>
+          <option value="">Current year only ({thisYear})</option>
+          {[1, 2, 3, 4].map((n) => (
+            <option key={n} value={thisYear - n}>From {thisYear - n} onwards</option>
+          ))}
+          <option value="0">All time (full history)</option>
+        </Select>
+      </Field>
       <FormActions isEdit={!!initial} label="Dealer" onSave={() => onSave(f)} onDelete={onDelete} />
 
       {initial && (

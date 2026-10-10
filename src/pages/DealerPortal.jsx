@@ -114,8 +114,7 @@ export default function DealerPortal({ dealer, identity, call, onLogout }) {
   const [unreadChats, setUnreadChats] = useState(0);
   const [runningBalance, setRunningBalance] = useState(null);
   const [showQr, setShowQr] = useState(false);
-  const [showAllYears, setShowAllYears] = useState(false); // false = current year only (default), true = all time
-  const currentYear = new Date().getFullYear();
+  const fromYear = dealerFromYear(dealer); // set by admin, dealers can't change it
   // Ref into the shared CommsWindow (Recent Chats/Recent Calls/New Call/
   // Customer Chat) so the mobile bottom tab bar can open it directly —
   // see DealerBottomTabBar's "Call/Chat" handling below.
@@ -441,38 +440,26 @@ export default function DealerPortal({ dealer, identity, call, onLogout }) {
           {tab === "Applications" && (
             <PrimaryButton onClick={() => setShowNew(true)} className="w-full sm:w-auto min-w-0 justify-center whitespace-nowrap">+ New Application</PrimaryButton>
           )}
-          {["Applications", "Appointment", "PCC Status", "Ledger"].includes(tab) && (
-            <label
-              className="inline-flex items-center gap-2 cursor-pointer select-none sm:ml-auto text-sm font-semibold text-slate-600 dark:text-slate-300"
-              title={showAllYears ? "Showing data from every year" : `Showing ${currentYear} data only — tick to see older data too`}
-            >
-              <input
-                type="checkbox"
-                checked={showAllYears}
-                onChange={(e) => setShowAllYears(e.target.checked)}
-                className="w-4 h-4 accent-blue-600"
-              />
-              <span>All time</span>
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${showAllYears ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-slate-50 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700"}`}>
-                {showAllYears ? "All years" : `${currentYear} only`}
-              </span>
-            </label>
+          {fromYear > 0 && ["Applications", "Appointment", "PCC Status", "Ledger"].includes(tab) && (
+            <span className="sm:ml-auto text-xs font-medium px-2 py-0.5 rounded-full border bg-slate-50 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700">
+              {fromYear === new Date().getFullYear() ? `${fromYear} data only` : `Data from ${fromYear}`}
+            </span>
           )}
         </div>
 
-        {tab === "Dashboard" && <DealerTeamDashboard dealerId={dealer.id} refreshKey={refreshKey} />}
+        {tab === "Dashboard" && <DealerTeamDashboard dealerId={dealer.id} refreshKey={refreshKey} fromYear={fromYear} />}
         {tab === "Applications" && (
           <DealerApplications
             dealerId={dealer.id}
             identity={identity}
             refreshKey={refreshKey}
-            showAllYears={showAllYears}
+            fromYear={fromYear}
             onSelect={(app) => setDocsForApp(app)}
             onChat={(app) => setChatApp({ id: app.id, label: `${app.draft_code} — ${app.applicant_name}` })}
           />
         )}
-        {tab === "Appointment" && <DealerAppointments dealerId={dealer.id} identity={identity} refreshKey={refreshKey} showAllYears={showAllYears} />}
-        {tab === "PCC Status" && <DealerPccStatus dealerId={dealer.id} refreshKey={refreshKey} showAllYears={showAllYears} />}
+        {tab === "Appointment" && <DealerAppointments dealerId={dealer.id} identity={identity} refreshKey={refreshKey} fromYear={fromYear} />}
+        {tab === "PCC Status" && <DealerPccStatus dealerId={dealer.id} refreshKey={refreshKey} fromYear={fromYear} />}
         {tab === "Call/Chat" && (
           <div className="space-y-5">
             <StaffDirectory call={call} />
@@ -496,9 +483,9 @@ export default function DealerPortal({ dealer, identity, call, onLogout }) {
                 </button>
               ))}
             </div>
-            {ledgerSubTab === "My Ledger" && <DealerLedger dealerId={dealer.id} refreshKey={refreshKey} showAllYears={showAllYears} />}
-            {ledgerSubTab === "Service" && <DealerServiceAmounts dealerId={dealer.id} showAllYears={showAllYears} />}
-            {ledgerSubTab === "Payments" && <DealerPaymentHistory dealerId={dealer.id} refreshKey={refreshKey} showAllYears={showAllYears} />}
+            {ledgerSubTab === "My Ledger" && <DealerLedger dealerId={dealer.id} refreshKey={refreshKey} fromYear={fromYear} />}
+            {ledgerSubTab === "Service" && <DealerServiceAmounts dealerId={dealer.id} fromYear={fromYear} />}
+            {ledgerSubTab === "Payments" && <DealerPaymentHistory dealerId={dealer.id} refreshKey={refreshKey} fromYear={fromYear} />}
           </>
         )}
         {tab === "Staff" && <DealerStaffTab dealerId={dealer.id} />}
@@ -875,10 +862,19 @@ function NewApplicationModal({ dealer, identity, onClose, onCreated }) {
 // Mirrors getProcessingStage()/pccNeeded()/serviceLabel() from the admin
 // Applications.jsx exactly — same computed (not stored) sub-status text
 // shown under the badge there, now shown the same way to the dealer.
-// Dealer portal shows only the current year's data unless the dealer ticks
-// "All time" (state lives in DealerPortal and is passed to every tab).
-function inCurrentYear(dateStr) {
-  return !!dateStr && Number(String(dateStr).slice(0, 4)) === new Date().getFullYear();
+// How much history a dealer can see is decided by the admin per dealer
+// (Masters -> Dealer -> "Data visible to dealer", stored in
+// dealers.visible_from_year):  null = current year only (default),
+// 0 = all time, 2024 = from 2024 onwards, etc.
+function dealerFromYear(dealer) {
+  const v = dealer?.visible_from_year;
+  if (v === null || v === undefined) return new Date().getFullYear();
+  return Number(v) || 0;
+}
+function inVisibleYears(dateStr, fromYear) {
+  if (!fromYear) return true; // 0 = all time
+  if (!dateStr) return false;
+  return Number(String(dateStr).slice(0, 4)) >= fromYear;
 }
 
 function pccNeeded(row) {
@@ -941,7 +937,7 @@ const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "Ju
 // dealer-side graph reads consistently with the internal ERP one.
 const TEAM_STATUS_COLORS = { pending: "#d97706", completed: "#059669" };
 
-function DealerTeamDashboard({ dealerId, refreshKey }) {
+function DealerTeamDashboard({ dealerId, refreshKey, fromYear = new Date().getFullYear() }) {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth()); // 0-11
   const [year, setYear] = useState(now.getFullYear());
@@ -953,7 +949,7 @@ function DealerTeamDashboard({ dealerId, refreshKey }) {
   // A handful of years back is enough for a dropdown — earliest applications
   // in this system are recent, and there's no reason to offer decades of
   // empty options.
-  const yearOptions = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
+  const yearOptions = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i).filter((y) => !fromYear || y >= fromYear);
 
   useEffect(() => {
     (async () => {
@@ -1155,7 +1151,7 @@ const PCC_STATUS_STYLES = {
   "Police Case": "bg-orange-50 text-orange-700 border-orange-300",
 };
 
-function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, showAllYears = false }) {
+function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, fromYear = new Date().getFullYear() }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   // Opens on "All" by default — a "Draft" default meant dealers/staff with
@@ -1168,7 +1164,6 @@ function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, 
   const [toast, setToast] = useState(null);
   const [sortKey, setSortKey] = useState("submitted_at");
   const [sortDir, setSortDir] = useState("desc");
-  const currentYear = new Date().getFullYear();
   const toggleSort = (key) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortKey(key); setSortDir(key === "submitted_at" ? "desc" : "asc"); }
@@ -1258,12 +1253,8 @@ function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, 
 
   useEffect(() => { load(); }, [load, refreshKey]);
 
-  // Current-year-only is the default, same as the admin Applications page —
-  // toggling "Show All Years" drops this filter.
-  const yearScopedRows = showAllYears ? rows : rows.filter((r) => {
-    const y = r.submitted_at ? Number(r.submitted_at.slice(0, 4)) : null;
-    return y === currentYear;
-  });
+  // How many years of history to show is set per dealer by the admin.
+  const yearScopedRows = rows.filter((r) => inVisibleYears(r.submitted_at, fromYear));
   const draftCount = yearScopedRows.filter((r) => DEALER_STATUS_GROUPS.Draft(r)).length;
   const statusFiltered = statusFilter === "All" ? yearScopedRows : yearScopedRows.filter((r) => DEALER_STATUS_GROUPS[statusFilter](r));
   const q = search.trim().toLowerCase();
@@ -1477,7 +1468,7 @@ function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, 
 // isEligibleForAppointment()/next_service_wait_days, unchanged). "Book
 // Appointment" fetches that source application's data and creates the
 // follow-up draft in one click, same as the old column's button did.
-function DealerAppointments({ dealerId, identity, refreshKey, showAllYears = false }) {
+function DealerAppointments({ dealerId, identity, refreshKey, fromYear = new Date().getFullYear() }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [serviceList, setServiceList] = useState([]);
@@ -1511,7 +1502,7 @@ function DealerAppointments({ dealerId, identity, refreshKey, showAllYears = fal
   useEffect(() => { load(); }, [load, refreshKey]);
 
   const convertedSourceIds = new Set(rows.map((r) => r.source_application_id).filter(Boolean));
-  const eligibleRows = rows.filter((r) => isEligibleForAppointment(r, convertedSourceIds) && (showAllYears || inCurrentYear(r.submitted_at)));
+  const eligibleRows = rows.filter((r) => isEligibleForAppointment(r, convertedSourceIds) && inVisibleYears(r.submitted_at, fromYear));
 
   const bookAppointment = async (payload) => {
     const { data: newApp, error } = await supabase
@@ -1599,7 +1590,7 @@ function DealerAppointments({ dealerId, identity, refreshKey, showAllYears = fal
   );
 }
 
-function DealerPccStatus({ dealerId, refreshKey = 0, showAllYears = false }) {
+function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFullYear() }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -1630,7 +1621,7 @@ function DealerPccStatus({ dealerId, refreshKey = 0, showAllYears = false }) {
   }, [dealerId, refreshKey]);
 
   const q = search.trim().toLowerCase();
-  const yearScopedRows = showAllYears ? rows : rows.filter((r) => inCurrentYear(r.submitted_at));
+  const yearScopedRows = rows.filter((r) => inVisibleYears(r.submitted_at, fromYear));
   const visibleRows = !q ? yearScopedRows : yearScopedRows.filter((r) =>
     [r.applicant_name, r.pcc_no, r.application_no, r.draft_code].some((v) => (v || "").toLowerCase().includes(q))
   );
@@ -2298,7 +2289,7 @@ function monthLabelOf(key) {
 // shows only what's been paid, this one shows only what's been charged —
 // every application's service amount alongside the applicant's own
 // details, straight from the applications table (no ledger join needed).
-function DealerServiceAmounts({ dealerId, showAllYears = false }) {
+function DealerServiceAmounts({ dealerId, fromYear = new Date().getFullYear() }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -2327,7 +2318,7 @@ function DealerServiceAmounts({ dealerId, showAllYears = false }) {
   }, [dealerId]);
 
   const filteredRows = rows.filter((r) => {
-    if (!showAllYears && !inCurrentYear(r.submitted_at)) return false;
+    if (!inVisibleYears(r.submitted_at, fromYear)) return false;
     const d = r.submitted_at?.slice(0, 10);
     if (rangeFrom && d < rangeFrom) return false;
     if (rangeTo && d > rangeTo) return false;
@@ -2423,7 +2414,7 @@ function DealerServiceAmounts({ dealerId, showAllYears = false }) {
 // what they've paid without SERVICE charge rows mixed in. Running Balance
 // shown here is still the dealer's real overall balance at that point in
 // time (services + payments combined) — just the row list is filtered.
-function DealerPaymentHistory({ dealerId, refreshKey = 0, showAllYears = false }) {
+function DealerPaymentHistory({ dealerId, refreshKey = 0, fromYear = new Date().getFullYear() }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -2456,7 +2447,7 @@ function DealerPaymentHistory({ dealerId, refreshKey = 0, showAllYears = false }
 
   const filteredRows = rows.filter((r) => {
     const d = r.entry_date;
-    if (!showAllYears && !inCurrentYear(d)) return false;
+    if (!inVisibleYears(d, fromYear)) return false;
     if (rangeFrom && d < rangeFrom) return false;
     if (rangeTo && d > rangeTo) return false;
     return true;
@@ -2531,7 +2522,7 @@ function DealerPaymentHistory({ dealerId, refreshKey = 0, showAllYears = false }
   );
 }
 
-function DealerLedger({ dealerId, refreshKey = 0, showAllYears = false }) {
+function DealerLedger({ dealerId, refreshKey = 0, fromYear = new Date().getFullYear() }) {
   const [txns, setTxns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -2620,9 +2611,9 @@ function DealerLedger({ dealerId, refreshKey = 0, showAllYears = false }) {
   const allMonthPickerOptions = monthOrder.includes(currentMonthKey)
     ? [...monthOrder].reverse()
     : [currentMonthKey, ...[...monthOrder].reverse()];
-  const monthPickerOptions = showAllYears
+  const monthPickerOptions = !fromYear
     ? allMonthPickerOptions
-    : allMonthPickerOptions.filter((k) => k.startsWith(`${now.getFullYear()}-`));
+    : allMonthPickerOptions.filter((k) => Number(k.slice(0, 4)) >= fromYear);
 
   // Running balance immediately before a given month, for months with no
   // transactions of their own (so the opening balance still carries over).
@@ -2647,11 +2638,11 @@ function DealerLedger({ dealerId, refreshKey = 0, showAllYears = false }) {
     const d = t.created_at ? t.created_at.slice(0, 10) : null;
     const afterFrom = !rangeFrom || (d && d >= rangeFrom);
     const beforeTo = !rangeTo || (d && d <= rangeTo);
-    const yearOk = showAllYears || inCurrentYear(t.created_at);
+    const yearOk = inVisibleYears(t.created_at, fromYear);
     if (afterFrom && beforeTo && yearOk) {
       rangeTxns.push(t);
-    } else if (!showAllYears && d && !inCurrentYear(d) && d < `${now.getFullYear()}-01-01`) {
-      // older-year entries: only carry the balance forward as the opening balance
+    } else if (fromYear && d && Number(d.slice(0, 4)) < fromYear) {
+      // hidden older entries: only carry the balance forward as the opening balance
       if (!rangeFrom || d < rangeFrom) rangeOpening = t.balance;
     } else if (rangeFrom && d && d < rangeFrom) {
       rangeOpening = t.balance;
@@ -2740,7 +2731,7 @@ function DealerLedger({ dealerId, refreshKey = 0, showAllYears = false }) {
               <div className="flex items-center justify-between mb-1 px-1">
                 <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
                   {group.key === "range"
-                    ? (rangeFrom || rangeTo ? `${rangeFrom || "…"} to ${rangeTo || "…"}` : (showAllYears ? "All transactions" : `${now.getFullYear()} transactions`))
+                    ? (rangeFrom || rangeTo ? `${rangeFrom || "…"} to ${rangeTo || "…"}` : (!fromYear ? "All transactions" : fromYear === now.getFullYear() ? `${fromYear} transactions` : `Since ${fromYear}`))
                     : group.key === "Undated" ? "Undated" : monthLabelOf(group.key)}
                 </h4>
                 <div className="text-xs text-slate-500 dark:text-slate-500 flex gap-4">
