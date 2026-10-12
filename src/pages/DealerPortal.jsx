@@ -7,6 +7,9 @@
 import React, { useCallback, useEffect, useState, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { Card, StatusBadge, Modal, Field, Input, Select, PrimaryButton, GhostButton, Toast } from "../components/UI";
+import { usePersistedState, DEALER_TAB_KEY } from "../lib/persist";
+import { usePushThreadOpen, requestOpenThread } from "../lib/pushNav";
+import { postApplicationNotice, isDraftNoticeText } from "../lib/draftChat";
 import CommsWindow from "../components/CommsWindow";
 import ChatPanel from "../components/ChatPanel";
 import CallLogPanel from "../components/CallLogPanel";
@@ -101,8 +104,10 @@ function SortableTh({ label, sortKeyName, sortKey, sortDir, onSort, align = "lef
 // data/threads this portal shows. `call` is the useDirectCall() controller,
 // mounted once in App.jsx, for ringing a specific named admin staff member
 // straight from the "Our Team" directory on the Call/Chat tab.
-export default function DealerPortal({ dealer, identity, call, onLogout }) {
-  const [tab, setTab] = useState("Applications");
+export default function DealerPortal({ dealer, identity, call, onLogout, pushTarget, onPushTargetHandled }) {
+  // Remembered across refreshes; an invalid/stale value is corrected by the
+  // visibleTabs effect further down.
+  const [tab, setTab] = usePersistedState(DEALER_TAB_KEY, "Applications", ["Dashboard", "Applications", "Appointment", "PCC Status", "Ledger", "Staff"]); // "Call/Chat" is a popup, not a page, so it isn't restored
   // Which of the three Ledger sub-views ("My Ledger" / "Service" /
   // "Payments") is showing — see LEDGER_SUBTABS above.
   const [ledgerSubTab, setLedgerSubTab] = useState("My Ledger");
@@ -119,6 +124,8 @@ export default function DealerPortal({ dealer, identity, call, onLogout }) {
   // Customer Chat) so the mobile bottom tab bar can open it directly —
   // see DealerBottomTabBar's "Call/Chat" handling below.
   const commsRef = useRef(null);
+  // A tapped push notification asks to open one specific chat.
+  usePushThreadOpen({ target: pushTarget, ready: true, variant: "dealer", commsRef, onHandled: () => onPushTargetHandled?.() });
 
   // Running Balance shown beside Credit Limit in the summary cards — same
   // computation as the "My Ledger" tab (DealerLedger below), just lifted up
@@ -174,7 +181,7 @@ export default function DealerPortal({ dealer, identity, call, onLogout }) {
           kind: "chat",
           title: m.sender_name || "New message",
           body: m.body || (m.attachment_url ? "Sent an image" : ""),
-          onClick: () => setTab("Call/Chat"),
+          onClick: () => requestOpenThread(m.thread_id), // open that exact chat
         });
       })
       .subscribe();
@@ -189,7 +196,9 @@ export default function DealerPortal({ dealer, identity, call, onLogout }) {
     try {
       const thread = await getOrCreateThread({ dealerId: dealer.id, applicationId });
       await sendMessage({ threadId: thread.id, sender: { ...identity, body: text } });
-      sendPush({ targetType: "all_staff", title: identity?.name || "New message", body: text, data: { kind: "chat" } });
+      // A "New application submitted" note is a draft alert (own switch in
+      // Settings -> Notifications); other system notes (e.g. a document upload) stay chat.
+      sendPush({ targetType: "all_staff", title: identity?.name || "New message", body: text, data: { kind: isDraftNoticeText(text) ? "draft" : "chat", threadId: thread.id } });
     } catch {
       // Best-effort — a missed system note shouldn't block the flow that triggered it.
     }
@@ -502,7 +511,8 @@ export default function DealerPortal({ dealer, identity, call, onLogout }) {
             setTab("Applications");
             setRefreshKey((k) => k + 1);
             setToast(`Application ${draftCode} submitted as draft`);
-            postSystemMessage(`New application submitted: ${draftCode} — ${applicantName}. It's now showing under Draft Submitted.`);
+            // Goes into this application's own chat thread (created on the spot), not the general one.
+            postSystemMessage(`New application submitted: ${draftCode} — ${applicantName}. It's now showing under Draft Submitted.`, applicationId);
             setDocsForApp({ id: applicationId, applicant_name: applicantName, draft_code: draftCode, service_id: serviceId });
           }}
         />
@@ -1523,6 +1533,13 @@ function DealerAppointments({ dealerId, identity, refreshKey, fromYear = new Dat
       }
     }
     await copyForwardDocuments(bookingApp.sourceApp.id, newApp.id);
+    // Same as a normally-submitted draft: open its chat thread and tell staff there.
+    postApplicationNotice({
+      dealerId,
+      applicationId: newApp.id,
+      identity,
+      text: `New application submitted: ${payload.draft_code} — ${payload.applicant_name} (appointment booking). It's now showing under Draft Submitted.`,
+    });
     setToast(`Created ${payload.draft_code} from ${bookingApp.sourceApp.draft_code}`);
     setBookingApp(null);
     load();

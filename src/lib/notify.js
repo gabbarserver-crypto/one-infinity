@@ -15,6 +15,7 @@
 // project.
 
 import { isSoundEnabled, getSelectedTone } from "./notificationSound";
+import { isTypeEnabled, isQuietNow } from "./notificationPrefs";
 
 const hasBrowserNotifications = typeof window !== "undefined" && "Notification" in window;
 
@@ -106,8 +107,14 @@ function playTone(toneDef) {
 
 // Plays the user's currently-selected notification tone (Settings ->
 // Notifications), unless they've muted notification sound entirely.
-export function playPing() {
+//
+// Quiet hours (Settings -> Notifications) silence chat / draft / payment
+// pings. Calls (the ringtone) and the Settings "Test notification" are
+// exempt: a missed call is worse than a night-time ring, and a test that
+// silently does nothing in quiet hours would look broken.
+export function playPing(kind = "chat") {
   if (!isSoundEnabled()) return;
+  if (kind !== "call" && kind !== "test" && isQuietNow()) return;
   playTone(getSelectedTone());
 }
 
@@ -128,11 +135,12 @@ export function previewTone(toneDef) {
 let ringtoneTimer = null;
 export function startRingtone() {
   if (ringtoneTimer) return; // already ringing
-  playPing();
+  if (!isTypeEnabled("call")) return; // Call notifications switched off in Settings
+  playPing("call");
   // 3s gap — long enough that the bundled custom tune (~2.5s) finishes
   // before the next one starts; still snappy for the short synthesized
   // tones.
-  ringtoneTimer = setInterval(playPing, 3000);
+  ringtoneTimer = setInterval(() => playPing("call"), 3000);
 }
 export function stopRingtone() {
   if (ringtoneTimer) { clearInterval(ringtoneTimer); ringtoneTimer = null; }
@@ -149,7 +157,9 @@ export function onNotify(fn) {
 // differently. `silent` skips the sound (used for e.g. a call that already
 // has its own ring UI).
 export function notify({ kind = "chat", title, body, onClick, silent = false }) {
-  if (!silent) playPing();
+  // Switched off in Settings -> Notifications: no toast, no sound, no OS alert.
+  if (!isTypeEnabled(kind)) return;
+  if (!silent) playPing(kind);
   listeners.forEach((fn) => fn({ kind, title, body, onClick, id: `${Date.now()}-${Math.random().toString(36).slice(2)}` }));
 
   // Also raise a real OS/browser notification once the tab isn't the
@@ -157,7 +167,7 @@ export function notify({ kind = "chat", title, body, onClick, silent = false }) 
   // and duplicating it while focused would just be noisy.
   if (hasBrowserNotifications && Notification.permission === "granted" && document.visibilityState === "hidden") {
     try {
-      const n = new Notification(title, { body, tag: kind });
+      const n = new Notification(title, { body, tag: kind, silent: kind !== "call" && kind !== "test" && isQuietNow() });
       if (onClick) n.onclick = () => { window.focus(); onClick(); n.close(); };
     } catch {
       // Some WebViews (Capacitor included) don't support the Notification

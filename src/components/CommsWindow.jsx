@@ -185,6 +185,10 @@ const CommsWindow = forwardRef(function CommsWindow({ variant, identity, call, d
     open: openWindow,
     close: closeWindow,
     isOpen: () => open,
+    // Opens the window straight onto one conversation (used when a push
+    // notification is tapped). `thread` = { threadId, dealerId,
+    // applicationId, label, dealerName }.
+    openThread: (thread) => { setOpen(true); setSelectedThread(thread); },
   }));
 
   // Opening a thread hands it to <ChatPanel/>, which marks it read

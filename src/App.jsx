@@ -24,8 +24,11 @@ import GlobalCallOverlay from "./components/GlobalCallOverlay";
 import NotificationToaster from "./components/NotificationToaster";
 import { useDirectCall } from "./lib/directCall";
 import { notify, requestNotificationPermission, primeAudioOnFirstInteraction } from "./lib/notify";
-import { registerForPush, unregisterForPush } from "./lib/push";
+import { registerForPush, unregisterForPush, initPushTapListener } from "./lib/push";
+import { onThreadTarget, clearThreadTarget, usePushThreadOpen, requestOpenThread } from "./lib/pushNav";
+import { NAV_KEY, readSaved, writeSaved, clearSavedNav } from "./lib/persist";
 import { identityFor } from "./lib/chat";
+import { isDraftNoticeText } from "./lib/draftChat";
 import { chatUnreadSummary } from "./lib/serverApi";
 import { subscribeThreadRead } from "./lib/threadReadBus";
 import PinUnlock from "./pages/PinUnlock";
@@ -118,7 +121,25 @@ export default function App() {
   // ?nav=dealerLedger&entity=<id> — read once on load so the new tab lands
   // straight on that dealer/agency's ledger instead of the dashboard.
   const initialUrlParams = React.useMemo(() => new URLSearchParams(window.location.search), []);
-  const [active, setActive] = useState(initialUrlParams.get("nav") || "dashboard");
+  // Page to show: an explicit ?nav= link wins, then the page this person was
+  // on before a refresh/restart, then the dashboard. (A saved page that isn't
+  // allowed for this login is corrected by the visibleNav effect below.)
+  const [active, setActive] = useState(() => initialUrlParams.get("nav") || readSaved(NAV_KEY) || "dashboard");
+  useEffect(() => {
+    writeSaved(NAV_KEY, active);
+    // Once they navigate away from the page a ?nav=…&entity=… link opened,
+    // drop those params — otherwise a refresh would jump back to the link's
+    // page instead of staying on the current one.
+    try {
+      const url = new URL(window.location.href);
+      const linkNav = url.searchParams.get("nav");
+      if (linkNav && linkNav !== active) {
+        url.searchParams.delete("nav");
+        url.searchParams.delete("entity");
+        window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+      }
+    } catch { /* best-effort */ }
+  }, [active]);
   const commsWindowRef = useRef(null);
   const initialEntityId = initialUrlParams.get("entity") || null;
   const [pendingChatCount, setPendingChatCount] = useState(0);
@@ -228,10 +249,10 @@ export default function App() {
         const m = payload.new;
         if (m && m.sender_type !== "staff") {
           notify({
-            kind: "chat",
+            kind: isDraftNoticeText(m.body) ? "draft" : "chat",
             title: m.sender_name || "New message",
             body: m.body || (m.attachment_url ? "Sent an image" : ""),
-            onClick: () => setActive("chats"),
+            onClick: () => requestOpenThread(m.thread_id), // open that exact chat
           });
         }
       })
@@ -243,14 +264,12 @@ export default function App() {
       .channel(`applications:new-draft:${Math.random().toString(36).slice(2)}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "applications" }, (payload) => {
         const a = payload.new;
-        if (a?.status === "Draft Submitted") {
-          notify({
-            kind: "draft",
-            title: "New draft application",
-            body: `${a.draft_code || a.application_no || ""} — ${a.applicant_name || ""}`.trim(),
-            onClick: () => setActive("applications"),
-          });
-        }
+        // No separate toast/sound here any more: a dealer-submitted draft
+        // opens its own chat thread and posts a message into it (see
+        // lib/draftChat.js), and THAT message is what notifies staff — it
+        // lands in the Call/Chat window like every other conversation.
+        // This only keeps the Draft badge count current.
+        if (a?.status === "Draft Submitted") refreshPendingDraftCount();
       })
       .subscribe();
     // New payments — a QR payment landing automatically is work staff
@@ -407,6 +426,7 @@ export default function App() {
         setPasswordRecovery(true);
         return;
       }
+      if (event === "SIGNED_OUT") clearSavedNav();
       verifySession(session);
     });
     return () => listener.subscription.unsubscribe();
@@ -489,6 +509,22 @@ export default function App() {
 
   const userLabel = staff?.full_name || dealer?.name || dealerStaff?.full_name || "there";
 
+  // Tapped push notification -> open that chat. initPushTapListener() runs at
+  // startup (before sign-in) so a cold-start tap isn't missed; the request
+  // then waits in lib/pushNav.js until the signed-in UI is unlocked.
+  const [pushTarget, setPushTarget] = useState(null);
+  useEffect(() => { initPushTapListener(); }, []);
+  useEffect(() => onThreadTarget(setPushTarget), []);
+  const handlePushTargetDone = useCallback(() => { clearThreadTarget(); setPushTarget(null); }, []);
+  const lockedByPin = !!authUserId && hasPinSetUp(authUserId) && !pinUnlocked;
+  usePushThreadOpen({
+    target: staff ? pushTarget : null, // dealer logins are handled inside DealerPortal
+    ready: !!staff && !lockedByPin,
+    variant: "staff",
+    commsRef: commsWindowRef,
+    onHandled: handlePushTargetDone,
+  });
+
   // One identity for whoever is signed in — staff, a dealer's own login, or
   // one of a dealer's sub-staff logins. Used both for chat (as before) and
   // now for direct person-to-person calling (see lib/directCall.js). The
@@ -545,7 +581,7 @@ export default function App() {
   if (dealer) {
     return (
       <>
-        <DealerPortal dealer={dealer} identity={myIdentity} call={directCall} onLogout={() => supabase.auth.signOut()} />
+        <DealerPortal dealer={dealer} identity={myIdentity} call={directCall} onLogout={() => supabase.auth.signOut()} pushTarget={pushTarget} onPushTargetHandled={handlePushTargetDone} />
         <GlobalCallOverlay call={directCall} />
         <NotificationToaster />
         {pinSetupOverlay}

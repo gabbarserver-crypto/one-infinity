@@ -288,6 +288,30 @@ export async function listRecentThreadsForDealer(dealerId, limit = 30) {
     });
 }
 
+// One thread, in the same { threadId, dealerId, applicationId, label,
+// dealerName } shape CommsWindow's thread list hands to openThread() — used
+// to open a specific chat straight from a tapped push notification. Returns
+// null if the thread doesn't exist or this login can't see it.
+export async function getThreadSummary(threadId, variant = "staff") {
+  if (!threadId) return null;
+  const select = variant === "staff"
+    ? "id, application_id, dealer_id, applications(draft_code, application_no, applicant_name), dealers(name, short_name, code)"
+    : "id, application_id, dealer_id, applications(draft_code, application_no, applicant_name)";
+  const { data: t, error } = await supabase.from("chat_threads").select(select).eq("id", threadId).maybeSingle();
+  if (error || !t) return null;
+  const dealerLabel = t.dealers?.short_name || t.dealers?.name || t.dealers?.code || null;
+  const appLabel = t.application_id
+    ? `${t.applications?.application_no || t.applications?.draft_code || "—"} — ${t.applications?.applicant_name || "—"}`
+    : null;
+  return {
+    threadId: t.id,
+    dealerId: t.dealer_id,
+    applicationId: t.application_id,
+    label: appLabel || (variant === "staff" ? (dealerLabel || "General") : "Support Team"),
+    dealerName: dealerLabel,
+  };
+}
+
 // Resolves who's currently logged in, in the shape sendMessage() expects.
 // `staff` and `dealer`/`dealerStaff` are whatever App.jsx already has in
 // state — this just normalizes them into one sender object.

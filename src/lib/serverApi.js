@@ -73,6 +73,25 @@ export async function sendPush({ targetType, targetId, title, body, data }) {
   }
 }
 
+// Settings -> "Test notification": pushes a real notification to the signed-in
+// person's own registered device(s) and, unlike sendPush(), RETURNS the result
+// so the screen can say what happened: { sent, failed } or { sent: 0, reason }
+// or { error }. Never throws.
+export async function sendTestPush({ targetType, targetId }) {
+  try {
+    return await post("/api/send-push", {
+      accessToken: await accessToken(),
+      targetType,
+      targetId,
+      title: "Test notification",
+      body: "If you can see this, push notifications are working on this phone.",
+      data: { kind: "test" },
+    });
+  } catch (e) {
+    return { error: e.message || "Could not send the test notification" };
+  }
+}
+
 // A dealer (or their active sub-staff), or staff on a dealer's behalf, asks
 // for a UPI QR to pay a specific amount -- see api/payments/create-qr.js.
 // Returns { qrRequestId, qrImageUrl, qrRawString, expiresAt, cfOrderId }.

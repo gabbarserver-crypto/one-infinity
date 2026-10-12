@@ -1,5 +1,6 @@
 // src/pages/Masters.jsx
 import React, { useEffect, useState, useCallback } from "react";
+import { usePersistedState, MASTERS_TAB_KEY } from "../lib/persist";
 import { supabase } from "../lib/supabase";
 import { Card, Field, Input, Select, PrimaryButton, GhostButton, Modal, Toast } from "../components/UI";
 import ApplicationChatModal from "../components/ApplicationChatModal";
@@ -10,7 +11,7 @@ import { createDealerLogin, createDealerStaffLogin } from "../lib/serverApi";
 const TABS = ["RTO", "Staff", "Service", "Dealer", "Agency"];
 
 export default function Masters({ call, staff }) {
-  const [tab, setTab] = useState("RTO");
+  const [tab, setTab] = usePersistedState(MASTERS_TAB_KEY, "RTO", TABS);
   const [toast, setToast] = useState(null);
 
   const notify = (msg) => setToast(msg);
@@ -41,6 +42,15 @@ export default function Masters({ call, staff }) {
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>
   );
+}
+
+/* Same wording as the "Data visible to dealer" dropdown in the dealer form. */
+function dealerVisibilityLabel(v) {
+  const thisYear = new Date().getFullYear();
+  if (v === null || v === undefined || v === "") return `Current year only (${thisYear})`;
+  const n = Number(v);
+  if (n === 0) return "All time (full history)";
+  return `From ${n} onwards`;
 }
 
 /* ---------------- Generic list table ---------------- */
@@ -570,7 +580,8 @@ function DealerMaster({ notify, call }) {
       <ListTable
         rows={rows}
         columns={[
-          { key: "name", label: "Dealer Name" }, { key: "short_name", label: "Short Name", render: (r) => r.short_name || "—" }, { key: "code", label: "Code" }, { key: "contact_name", label: "Contact" },
+          // Short Name and Code are intentionally not shown as columns, but ListTable's search checks every field on the row, so dealers can still be found by them.
+          { key: "name", label: "Dealer Name" }, { key: "contact_name", label: "Contact" },
           { key: "mobile", label: "Mobile", render: (r) => r.mobile ? (
             <div className="flex items-center gap-2 whitespace-nowrap">
               <span>{r.mobile}</span>
@@ -589,6 +600,7 @@ function DealerMaster({ notify, call }) {
             </div>
           ) : <span className="text-slate-300 text-xs">—</span> },
           { key: "credit_limit", label: "Credit Limit", render: (r) => `₹${Number(r.credit_limit||0).toLocaleString("en-IN")}` },
+          { key: "visible_from_year", label: "Data Visible", render: (r) => dealerVisibilityLabel(r.visible_from_year) },
           { key: "status", label: "Status", render: (r) => {
             const avail = summaryByDealer[r.id];
             if (avail === undefined) return <span className="text-slate-300 text-xs">—</span>;

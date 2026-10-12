@@ -2,12 +2,14 @@
 import React, { useState } from "react";
 import { setPin, markPinPrompted } from "../lib/pinLock";
 import PinPad from "./PinPad";
+import BiometricOffer from "./BiometricOffer";
+import { isBiometricAvailable } from "../lib/biometric";
 
 // Shown once after a fresh full login (password/OTP/passkey), offering to
 // set up a quick-unlock PIN for next time. Fully skippable — dismissing it
 // marks this user as "already asked" so it doesn't nag on every login.
 export default function SetupPinPrompt({ userId, onDone }) {
-  const [step, setStep] = useState("offer"); // "offer" | "create" | "confirm"
+  const [step, setStep] = useState("offer"); // "offer" | "create" | "confirm" | "biometric"
   const [firstPin, setFirstPin] = useState("");
   const [error, setError] = useState("");
 
@@ -21,6 +23,14 @@ export default function SetupPinPrompt({ userId, onDone }) {
     setStep("confirm");
   };
 
+  // The PIN is only written once the whole flow is finished (below), so the
+  // app can't swap to the unlock screen halfway through the fingerprint step.
+  const finish = async (pin) => {
+    await setPin(userId, pin);
+    markPinPrompted(userId);
+    onDone();
+  };
+
   const handleConfirm = async (pin) => {
     if (pin !== firstPin) {
       setError("Didn't match — try again");
@@ -28,9 +38,11 @@ export default function SetupPinPrompt({ userId, onDone }) {
       setFirstPin("");
       return;
     }
-    await setPin(userId, pin);
-    markPinPrompted(userId);
-    onDone();
+    if (await isBiometricAvailable()) {
+      setStep("biometric");
+      return;
+    }
+    await finish(pin);
   };
 
   return (
@@ -61,6 +73,7 @@ export default function SetupPinPrompt({ userId, onDone }) {
             <button onClick={skip} className="text-slate-400 hover:text-slate-600 text-sm mt-6">Skip for now</button>
           </>
         )}
+        {step === "biometric" && <BiometricOffer userId={userId} onDone={() => finish(firstPin)} />}
         {step === "confirm" && (
           <>
             <h2 className="text-lg font-bold text-slate-800 mb-1">Confirm your PIN</h2>

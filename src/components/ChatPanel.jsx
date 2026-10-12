@@ -153,12 +153,15 @@ export default function ChatPanel({ dealerId, applicationId = null, identity, em
   // logins actually reads it); a dealer or their sub-staff messaging staff
   // broadcasts to every staff device, since any staff member picks up
   // dealer chats — there's no single "assigned" staff member per thread.
+  // threadId rides along in `data` so tapping the notification can open this
+  // exact conversation (see lib/pushNav.js).
   const pushForMessage = (preview) => {
     if (!identity) return;
+    const data = threadId ? { kind: "chat", threadId } : { kind: "chat" };
     if (identity.type === "staff") {
-      sendPush({ targetType: "dealer", targetId: dealerId, title: identity.name || "New message", body: preview, data: { kind: "chat" } });
+      sendPush({ targetType: "dealer", targetId: dealerId, title: identity.name || "New message", body: preview, data });
     } else {
-      sendPush({ targetType: "all_staff", title: identity.name || "New message", body: preview, data: { kind: "chat" } });
+      sendPush({ targetType: "all_staff", title: identity.name || "New message", body: preview, data });
     }
   };
 

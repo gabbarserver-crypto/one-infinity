@@ -34,7 +34,10 @@ import { sendPushNotification } from "./_lib/push.js";
 // sent by the Cashfree webhook on the server side (it calls
 // sendPushNotification directly and never goes through this endpoint).
 // "payment_qr" is only ever sent by staff.
-const CLIENT_KINDS = new Set(["chat", "call", "payment_qr"]);
+// "draft" is the new-draft-submitted notice (own kind so it has its own toggle
+// in Settings). "test" is the Settings "Test notification" button — it may only
+// ever target the caller's own device(s), see below.
+const CLIENT_KINDS = new Set(["chat", "draft", "call", "payment_qr", "test"]);
 const STAFF_ONLY_KINDS = new Set(["payment_qr"]);
 
 export default async function handler(req, res) {
@@ -64,8 +67,14 @@ export default async function handler(req, res) {
     }
 
     // Who may this caller notify? Staff: anyone. Dealer / dealer_staff:
-    // admin staff only (what the app itself ever does).
-    if (!canReach(caller, targetType, targetId)) {
+    // admin staff only (what the app itself ever does). A "test" push is the
+    // one exception: it is allowed only to yourself (checked below).
+    const isTest = data?.kind === "test";
+    if (isTest) {
+      if (caller.kind !== targetType || String(caller.id) !== String(targetId)) {
+        return res.status(403).json({ error: "A test notification can only be sent to yourself" });
+      }
+    } else if (!canReach(caller, targetType, targetId)) {
       return res.status(403).json({ error: "Not allowed to notify this recipient" });
     }
 
