@@ -4,6 +4,7 @@
 // configured next service (Masters > Service > Next Service), and builds
 // the payload for the new draft.
 import { supabase } from "./supabase";
+import { fetchAllRows } from "./fetchAll";
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -96,23 +97,32 @@ export async function copyForwardDocuments(sourceAppId, newAppId) {
 // button. Pass dealerId to scope it to one dealer (Dealer Portal); omit it
 // for the system-wide admin/staff view.
 export async function fetchFollowUpReport(dealerId = null) {
-  let query = supabase
-    .from("applications")
-    .select("id, draft_code, application_no, applicant_name, dealer_id, completed_at, source_application_id, dealers(name, short_name), services!inner(parent_service, short_name, next_service_id)")
-    .eq("status", "Accepted")
-    .not("services.next_service_id", "is", null)
-    .not("completed_at", "is", null)
-    .order("completed_at", { ascending: true });
-  if (dealerId) query = query.eq("dealer_id", dealerId);
+  // Paged (fetchAllRows): both queries here were silently cut off at 1000 rows.
+  const buildQuery = () => {
+    let query = supabase
+      .from("applications")
+      .select("id, draft_code, application_no, applicant_name, dealer_id, completed_at, source_application_id, dealers(name, short_name), services!inner(parent_service, short_name, next_service_id)")
+      .eq("status", "Accepted")
+      .not("services.next_service_id", "is", null)
+      .not("completed_at", "is", null)
+      .order("completed_at", { ascending: true })
+      .order("id", { ascending: true });
+    if (dealerId) query = query.eq("dealer_id", dealerId);
+    return query;
+  };
 
-  const { data, error } = await query;
+  const { data, error } = await fetchAllRows(buildQuery);
   if (error) return { rows: [], error };
 
   // "Done" means some other application already points back at this one as
   // its source — i.e. the follow-up draft was already created (same rule
   // "book appointment" uses for convertedSourceIds), regardless of that
   // follow-up's own current status.
-  const { data: allSourceIds } = await supabase.from("applications").select("source_application_id").not("source_application_id", "is", null);
+  // If this one fails we must NOT quietly treat every row as "not done".
+  const { data: allSourceIds, error: sourceIdsError } = await fetchAllRows(() =>
+    supabase.from("applications").select("source_application_id").not("source_application_id", "is", null).order("id", { ascending: true })
+  );
+  if (sourceIdsError) return { rows: [], error: sourceIdsError };
   const converted = new Set((allSourceIds || []).map((r) => r.source_application_id));
 
   const rows = (data || []).map((app) => ({

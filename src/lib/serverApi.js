@@ -20,15 +20,15 @@
 // window.Capacitor is only present inside the native wrapper, never in a
 // normal browser tab, so it's a reliable way to tell the two apart without
 // needing a separate env var per platform.
+import { Capacitor } from "@capacitor/core";
 import { supabase } from "./supabase";
 
-const REAL_BACKEND_ORIGIN = "https://1infinity.online";
+const REAL_BACKEND_ORIGIN = "https://www.1infinity.online"; // primary host in Vercel → Domains
 
 function resolveServerApiBase() {
-  const configured = import.meta.env.VITE_SERVER_API_BASE;
-  if (configured) return configured;
-  const isNativeApp = typeof window !== "undefined" && !!window.Capacitor;
-  return isNativeApp ? REAL_BACKEND_ORIGIN : "";
+  // NOTE: window.Capacitor exists in normal browsers too, so use isNativePlatform().
+  if (!Capacitor.isNativePlatform()) return ""; // web/PWA: same-origin
+  return import.meta.env.VITE_SERVER_API_BASE || REAL_BACKEND_ORIGIN;
 }
 
 export const SERVER_API_BASE = resolveServerApiBase();
@@ -82,10 +82,14 @@ export async function createPaymentQr({ dealerId, applicationId, amount, minutes
   return post("/api/payments/create-qr", { accessToken: await accessToken(), dealerId, applicationId, amount, minutesValid });
 }
 
-// Anyone signed in (staff, dealer, or dealer sub-staff) can request a token
-// to join an Agora call on the given channel (= the chat_thread id).
-export async function fetchAgoraToken({ channel }) {
-  return post("/api/agora-token", { accessToken: await accessToken(), channel });
+// Token to join an Agora call. The server checks the caller is actually
+// allowed on the call:
+//   - thread call:  pass { threadId } -- must be a thread you belong to.
+//   - direct call:  pass { sessionId, peerType, peerId } -- the server
+//     derives the channel name and returns it as `channel`; join THAT one.
+// Returns { token, appId, uid, channel }.
+export async function fetchAgoraToken({ threadId, sessionId, peerType, peerId }) {
+  return post("/api/agora-token", { accessToken: await accessToken(), threadId, sessionId, peerType, peerId });
 }
 
 // Marks the caller's side ('staff' or 'dealer', dealer_staff folded into
@@ -106,4 +110,10 @@ export async function chatReadReceipt({ threadId, markRead = true }) {
 // they've opened a thread.
 export async function chatUnreadSummary() {
   return post("/api/chat/unread-summary", { accessToken: await accessToken() });
+}
+
+// One-time code for opening the Games app signed in, instead of putting the
+// session tokens in its URL. See api/games-handoff.js. Returns { code }.
+export async function createGamesHandoffCode({ refreshToken }) {
+  return post("/api/games-handoff", { action: "create", accessToken: await accessToken(), refreshToken });
 }

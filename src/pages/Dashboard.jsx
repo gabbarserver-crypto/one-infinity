@@ -1,6 +1,8 @@
 // src/pages/Dashboard.jsx
 import React, { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { createGamesHandoffCode } from "../lib/serverApi";
+import { fetchAllRows } from "../lib/fetchAll";
 import { Capacitor } from "@capacitor/core";
 import { Browser } from "@capacitor/browser";
 import { FileText, CalendarCheck, CalendarClock, FileEdit, Clock, CheckCircle2, Users, UserCheck, Download, Smartphone, CreditCard, BarChart2, Settings as SettingsIcon, LayoutGrid, Wallet, Landmark, Gamepad2 } from "lucide-react";
@@ -50,18 +52,24 @@ const DEALER_BAR_COLORS = { pending: "#d97706", completed: "#059669" };
 // Supabase session so a staff member who's already logged in here doesn't
 // have to log in again there. Both apps share the same Supabase project,
 // so the games site adopts this session via supabase.auth.setSession().
-// Tokens travel in the URL only once and are stripped immediately on
-// arrival — see sjo-supabase-sync.js on the games site.
+// Only a one-time code travels in the URL (see api/games-handoff.js); the
+// games site redeems it for the session -- see sjo-supabase-sync.js there.
 const GAMES_URL = "https://sjo-games-vercel-app.vercel.app/games/index.html";
 const openGames = async () => {
-  const { data: { session } } = await supabase.auth.getSession();
+  // The session is handed to the Games app via a short-lived, single-use
+  // code (api/games-handoff.js) -- never by putting the access/refresh
+  // tokens in the URL, where they'd end up in history, logs and Referer
+  // headers. If the hand-off can't be created, Games still opens, just
+  // signed out, rather than falling back to tokens in the URL.
   let url = GAMES_URL;
-  if (session) {
-    const params = new URLSearchParams({
-      at: session.access_token,
-      rt: session.refresh_token,
-    });
-    url = `${GAMES_URL}?${params.toString()}`;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      const { code } = await createGamesHandoffCode({ refreshToken: session.refresh_token });
+      if (code) url = `${GAMES_URL}?${new URLSearchParams({ code }).toString()}`;
+    }
+  } catch (e) {
+    console.error("Games hand-off failed:", e);
   }
 
   if (Capacitor.isNativePlatform()) {
@@ -122,10 +130,17 @@ export default function Dashboard({ visibleNav = [], onNavigate, active }) {
       setTrendLoading(true);
       // Rolling 6-month window ending this month (oldest -> newest).
       const rangeStart = new Date(now0.getFullYear(), now0.getMonth() - 5, 1).toISOString();
-      const { data } = await supabase
-        .from("applications")
-        .select("id, status, submitted_at, ll_dl_no, services(ll_dl_no_required)")
-        .gte("submitted_at", rangeStart);
+      // Paged: six months of applications is well past Supabase's 1000-row
+      // cap, which silently under-counted the trend.
+      const { data, error } = await fetchAllRows(() =>
+        supabase
+          .from("applications")
+          .select("id, status, submitted_at, ll_dl_no, services(ll_dl_no_required)")
+          .gte("submitted_at", rangeStart)
+          .order("submitted_at", { ascending: false })
+          .order("id", { ascending: false })
+      );
+      if (error) console.error("Dashboard trend failed:", error);
       setTrendRows(data || []);
       setTrendLoading(false);
     })();
@@ -140,11 +155,15 @@ export default function Dashboard({ visibleNav = [], onNavigate, active }) {
       setMonthError("");
       const rangeStart = new Date(year, month, 1).toISOString();
       const rangeEnd = new Date(year, month + 1, 1).toISOString();
-      const { data, error } = await supabase
-        .from("applications")
-        .select("id, status, submitted_at, ll_dl_no, dealers(name), services(ll_dl_no_required)")
-        .gte("submitted_at", rangeStart)
-        .lt("submitted_at", rangeEnd);
+      const { data, error } = await fetchAllRows(() =>
+        supabase
+          .from("applications")
+          .select("id, status, submitted_at, ll_dl_no, dealers(name), services(ll_dl_no_required)")
+          .gte("submitted_at", rangeStart)
+          .lt("submitted_at", rangeEnd)
+          .order("submitted_at", { ascending: false })
+          .order("id", { ascending: false })
+      );
       if (error) {
         setMonthError(error.message);
         setMonthLoading(false);
@@ -442,8 +461,8 @@ export default function Dashboard({ visibleNav = [], onNavigate, active }) {
               </div>
             )}
 
-            <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden max-h-72 overflow-y-auto">
-              <table className="w-full text-sm">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-x-auto max-h-72 overflow-y-auto">
+              <table className="m-scroll w-full text-sm">
                 <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 sticky top-0">
                   <tr>
                     <th className="px-3 py-2 text-left">Dealer</th>

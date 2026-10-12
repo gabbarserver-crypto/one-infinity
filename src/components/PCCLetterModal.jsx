@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { GhostButton, PrimaryButton, Field, Input, Select } from "./UI";
 import SearchableSelect from "./SearchableSelect";
 import { DELHI_POLICE_STATIONS } from "../lib/delhiPoliceStations";
+import { todayIST } from "../lib/dates";
 
 function isoToDDMMYYYY(iso) {
   if (!iso) return "";
@@ -38,7 +39,7 @@ const DEFAULT_ADDRESSEE =
 // Printing uses a "print-isolate" trick (see index.css) so it comes out
 // clean even though this lives inside a scrolling modal.
 export default function PCCLetterModal({ app, onClose }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIST();
   const [date, setDate] = useState(app.application_date || today);
   const [relation, setRelation] = useState("S/o.");
   const [vehicleType, setVehicleType] = useState("");

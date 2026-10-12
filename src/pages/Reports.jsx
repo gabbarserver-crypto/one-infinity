@@ -3,14 +3,14 @@ import React, { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { Card, Field, Input, Select, PrimaryButton } from "../components/UI";
 import FollowUpReport from "../components/FollowUpReport";
+import { fetchAllRows } from "../lib/fetchAll";
+import { todayIST, firstOfMonthIST } from "../lib/dates";
 
-function firstOfMonth() {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
-}
-function today() {
-  return new Date().toISOString().slice(0, 10);
-}
+// IST business dates -- the old toISOString().slice(0, 10) versions returned
+// the last day of the PREVIOUS month for firstOfMonth(), and "yesterday" for
+// today() between 00:00 and 05:30 IST (see lib/dates.js).
+const firstOfMonth = firstOfMonthIST;
+const today = todayIST;
 
 function serviceLabel(s) {
   if (!s) return "";
@@ -44,11 +44,16 @@ export default function Reports() {
   const runServiceReport = async () => {
     if (!serviceId) return;
     setServiceLoading(true);
-    const { data } = await supabase
-      .from("applications")
-      .select("id, applicant_name, remarks, status, submitted_at, dealers(name, short_name)")
-      .eq("service_id", serviceId)
-      .order("submitted_at", { ascending: false });
+    // Paged: a busy service easily has more than Supabase's 1000-row cap.
+    const { data, error } = await fetchAllRows(() =>
+      supabase
+        .from("applications")
+        .select("id, applicant_name, remarks, status, submitted_at, dealers(name, short_name)")
+        .eq("service_id", serviceId)
+        .order("submitted_at", { ascending: false })
+        .order("id", { ascending: false })
+    );
+    if (error) console.error("Service report failed:", error);
     setServiceRows(data || []);
     setServiceLoading(false);
   };
@@ -62,11 +67,17 @@ export default function Reports() {
 
   const runPccReport = async () => {
     setPccLoading(true);
-    const { data } = await supabase
-      .from("applications")
-      .select("id, applicant_name, pcc_no, pcc_status, submitted_at, dealers(name, short_name), services!inner(parent_service, short_name, pcc_required)")
-      .eq("services.pcc_required", true)
-      .order("submitted_at", { ascending: false });
+    // Paged: the Blank/Pending/Issued/Rejected tile counts are computed from
+    // these rows, so a silent 1000-row cap would make every tile wrong.
+    const { data, error } = await fetchAllRows(() =>
+      supabase
+        .from("applications")
+        .select("id, applicant_name, pcc_no, pcc_status, submitted_at, dealers(name, short_name), services!inner(parent_service, short_name, pcc_required)")
+        .eq("services.pcc_required", true)
+        .order("submitted_at", { ascending: false })
+        .order("id", { ascending: false })
+    );
+    if (error) console.error("PCC report failed:", error);
     setPccRows(data || []);
     setPccRan(true);
     setPccLoading(false);
@@ -127,8 +138,8 @@ export default function Reports() {
         </div>
 
         {serviceRows.length > 0 && (
-          <div className="mt-4 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="mt-4 border border-slate-200 dark:border-slate-800 rounded-xl overflow-x-auto">
+            <table className="m-scroll w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400">
                 <tr>
                   <th className="text-left font-medium px-3 py-2">Customer Name</th>
@@ -175,8 +186,8 @@ export default function Reports() {
             </div>
 
             {pccRows.length > 0 ? (
-              <div className="mt-4 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-                <table className="w-full text-sm">
+              <div className="mt-4 border border-slate-200 dark:border-slate-800 rounded-xl overflow-x-auto">
+                <table className="m-scroll w-full text-sm">
                   <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400">
                     <tr>
                       <th className="text-left font-medium px-3 py-2">Applicant</th>

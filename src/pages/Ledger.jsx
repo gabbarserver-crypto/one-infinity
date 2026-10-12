@@ -3,6 +3,7 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from "react"
 import { supabase } from "../lib/supabase";
 import { Card, Field, GhostButton, PrimaryButton, Modal } from "../components/UI";
 import { DealerForm, AgencyForm } from "./Masters";
+import { todayIST } from "../lib/dates";
 
 // Tailwind classes per ledger_type, purely cosmetic grouping — payments in
 // green, PCC in blue, anything else (service names like LL RIC, MCWG...)
@@ -260,12 +261,14 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
   // Rows within the selected date range (inclusive).
   const periodRows = useMemo(() => {
     if (!periodFrom && !periodTo) return sortedRows;
-    const from = periodFrom ? new Date(periodFrom + "T00:00:00") : null;
-    const to = periodTo ? new Date(periodTo + "T23:59:59") : null;
+    // entry_date and the period inputs are plain calendar dates, so compare
+    // them as "YYYY-MM-DD" strings. Building Date objects from them mixed UTC
+    // midnight (entry_date) with local midnight (the range), which is only
+    // right by accident in IST.
     return sortedRows.filter((r) => {
-      const d = new Date(r.entry_date);
-      if (from && d < from) return false;
-      if (to && d > to) return false;
+      const day = String(r.entry_date).slice(0, 10);
+      if (periodFrom && day < periodFrom) return false;
+      if (periodTo && day > periodTo) return false;
       return true;
     });
   }, [sortedRows, periodFrom, periodTo]);
@@ -424,8 +427,8 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
             </Card>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-x-auto">
+            <table className="m-scroll w-full text-sm">
               <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-500">
                 <tr>
                   <SortableTh label="Date" sortKeyName="entry_date" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
@@ -654,8 +657,8 @@ function SundryHead({ title, subtitle, entityMode, table, balancesTable, balance
           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-xs">🔍</span>
         </div>
       </div>
-      <div className="overflow-hidden border border-slate-200 dark:border-slate-800 rounded-xl">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl">
+        <table className="m-scroll w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-500">
             <tr>
               <th className="text-left font-medium px-3 py-2">Name</th>
@@ -763,7 +766,7 @@ function BankTab() {
     })();
   }, []);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIST();
   const todayRow = rows.find((r) => r.entry_date === today);
   const latestBalance = rows[0]?.bank_balance ?? 0; // rows are newest-first
 
@@ -827,8 +830,8 @@ function BankTab() {
         )}
       </div>
 
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-x-auto">
+        <table className="m-scroll w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-500">
             <tr>
               <th className="px-3 py-2 text-left">Date</th>

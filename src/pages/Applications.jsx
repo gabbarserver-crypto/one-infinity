@@ -9,6 +9,8 @@ import { parseCSV, findByLabel } from "../lib/csv";
 import * as XLSX from "xlsx";
 import BookAppointmentModal from "../components/BookAppointmentModal";
 import { identityFor } from "../lib/chat";
+import { fetchAllRows } from "../lib/fetchAll";
+import { todayIST, yearIST, istDayStart, istNextDayStart } from "../lib/dates";
 import { isEligibleForAppointment, copyForwardDocuments } from "../lib/nextService";
 import { MessageCircle, Phone, ArrowUp, ArrowDown, ArrowUpDown, Trash2, Link as LinkIcon, Pencil } from "lucide-react";
 import PCCStatusCheckModal from "../components/PCCStatusCheckModal";
@@ -718,48 +720,57 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     const servicesEmbed = filterService === "__PCC_REQUIRED__"
       ? "services!inner(parent_service,short_name,pcc_required,rto_required,agency_required,slot_booking_required,chat_in_app,next_service_id,next_service_wait_days,age_limit_required,min_age,application_no_required,ll_dl_no_required)"
       : "services(parent_service,short_name,pcc_required,rto_required,agency_required,slot_booking_required,chat_in_app,next_service_id,next_service_wait_days,age_limit_required,min_age,application_no_required,ll_dl_no_required)";
-    let query = supabase
-      .from("applications")
-      .select(`*, dealers(name,code,short_name), ${servicesEmbed}, staff:assigned_staff_id(full_name), accepted_staff:accepted_by(full_name), created_by_staff:created_by_dealer_staff_id(full_name)`)
-      .order("submitted_at", { ascending: false });
-    // "Under Review" isn't a status value that ever actually gets stored —
-    // it's the two earliest computed processing stages (see
-    // getProcessingStage below) of an "Accepted" application: staff have
-    // accepted it but neither the Application No. nor the PCC No. (or just
-    // the PCC No.) have come back yet. So this tab fetches every Accepted
-    // row and UNDER_REVIEW_STAGES below narrows it down client-side to just
-    // those two stages, same source of truth the Status column itself uses.
-    if (tab !== "All") query = query.eq("status", tab === "Under Review" ? "Accepted" : tab);
-    // Dealer / RTO / Agency / Service filters used to run client-side after
-    // fetching the entire table (all ~15k rows every time, joins and all) —
-    // pushed into the query itself so only the rows that actually match
-    // come over the network.
-    if (filterDealer) query = query.eq("dealer_id", filterDealer);
-    if (filterRto) query = query.eq("rto_id", filterRto);
-    if (filterAgency) query = query.eq("agency_id", filterAgency);
-    if (filterService === "__PCC_REQUIRED__") {
-      query = query.eq("services.pcc_required", true);
-    } else if (filterService) {
-      query = query.eq("service_id", filterService);
-    }
-    // Date filtering: an explicit From/To range overrides the current-year
-    // default, exactly as it did client-side before — just evaluated by
-    // Postgres now instead of being fetched in full and thrown away in the
-    // browser. The current-year default mirrors the old logic: prefer
-    // application_date, fall back to submitted_at when application_date is
-    // unset.
-    if (filterDateFrom || filterDateTo) {
-      if (filterDateFrom) query = query.gte("submitted_at", `${filterDateFrom}T00:00:00`);
-      if (filterDateTo) query = query.lte("submitted_at", `${filterDateTo}T23:59:59`);
-    } else if (!showAllYears) {
-      const currentYear = new Date().getFullYear();
-      const yFrom = `${currentYear}-01-01`;
-      const yTo = `${currentYear}-12-31`;
-      query = query.or(
-        `and(application_date.gte.${yFrom},application_date.lte.${yTo}),and(application_date.is.null,submitted_at.gte.${yFrom}T00:00:00,submitted_at.lte.${yTo}T23:59:59)`
-      );
-    }
-    const { data, error } = await query;
+    // Built fresh per page by fetchAllRows (a query builder can't be reused
+    // across .range() calls). Without paging, Supabase silently stops the
+    // list at its 1000-row cap.
+    const buildQuery = () => {
+      let query = supabase
+        .from("applications")
+        .select(`*, dealers(name,code,short_name), ${servicesEmbed}, staff:assigned_staff_id(full_name), accepted_staff:accepted_by(full_name), created_by_staff:created_by_dealer_staff_id(full_name)`)
+        .order("submitted_at", { ascending: false })
+        .order("id", { ascending: false }); // unique tiebreaker so paging is stable
+      // "Under Review" isn't a status value that ever actually gets stored —
+      // it's the two earliest computed processing stages (see
+      // getProcessingStage below) of an "Accepted" application: staff have
+      // accepted it but neither the Application No. nor the PCC No. (or just
+      // the PCC No.) have come back yet. So this tab fetches every Accepted
+      // row and UNDER_REVIEW_STAGES below narrows it down client-side to just
+      // those two stages, same source of truth the Status column itself uses.
+      if (tab !== "All") query = query.eq("status", tab === "Under Review" ? "Accepted" : tab);
+      // Dealer / RTO / Agency / Service filters used to run client-side after
+      // fetching the entire table (all ~15k rows every time, joins and all) —
+      // pushed into the query itself so only the rows that actually match
+      // come over the network.
+      if (filterDealer) query = query.eq("dealer_id", filterDealer);
+      if (filterRto) query = query.eq("rto_id", filterRto);
+      if (filterAgency) query = query.eq("agency_id", filterAgency);
+      if (filterService === "__PCC_REQUIRED__") {
+        query = query.eq("services.pcc_required", true);
+      } else if (filterService) {
+        query = query.eq("service_id", filterService);
+      }
+      // Date filtering: an explicit From/To range overrides the current-year
+      // default, exactly as it did client-side before — just evaluated by
+      // Postgres now instead of being fetched in full and thrown away in the
+      // browser. The current-year default mirrors the old logic: prefer
+      // application_date, fall back to submitted_at when application_date is
+      // unset.
+      if (filterDateFrom || filterDateTo) {
+        // Day boundaries are IST (with an explicit +05:30). A bare "T00:00:00"
+        // is read by Postgres as UTC, which shifted the window by 5h30m.
+        if (filterDateFrom) query = query.gte("submitted_at", istDayStart(filterDateFrom));
+        if (filterDateTo) query = query.lt("submitted_at", istNextDayStart(filterDateTo));
+      } else if (!showAllYears) {
+        const currentYear = yearIST();
+        const yFrom = `${currentYear}-01-01`;
+        const yTo = `${currentYear}-12-31`;
+        query = query.or(
+          `and(application_date.gte.${yFrom},application_date.lte.${yTo}),and(application_date.is.null,submitted_at.gte.${istDayStart(yFrom)},submitted_at.lt.${istNextDayStart(yTo)})`
+        );
+      }
+      return query;
+    };
+    const { data, error, truncated } = await fetchAllRows(buildQuery);
     if (error) {
       setToast("Couldn't load applications: " + error.message);
       setRows([]);
@@ -769,6 +780,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     const baseRows = data || [];
     setRows(baseRows);
     setLoading(false);
+    if (truncated) setToast("Showing the first 200,000 applications only — narrow the filters to see the rest.");
 
     // With "Showing All Years" (or no filters) this list can run into the
     // thousands of rows. Passing every id from that into a single .in(...)
@@ -790,7 +802,9 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     // so we don't leave dangling requests, but we don't need their errors).
     const queryInChunks = async (buildQuery, ids) => {
       if (!ids.length) return { data: [], error: null };
-      const results = await Promise.all(chunk(ids, ID_CHUNK_SIZE).map((idsChunk) => buildQuery(idsChunk)));
+      // Each chunk is paged too: one chunk can match more than 1000 rows
+      // (e.g. messages across 200 threads) and would otherwise be cut off silently.
+      const results = await Promise.all(chunk(ids, ID_CHUNK_SIZE).map((idsChunk) => fetchAllRows(() => buildQuery(idsChunk))));
       const firstError = results.find((r) => r.error)?.error || null;
       const data = firstError ? null : results.flatMap((r) => r.data || []);
       return { data, error: firstError };
@@ -807,7 +821,8 @@ export default function Applications({ restricted = false, canEdit = true, canAp
               .from("application_documents")
               .select("id, application_id, name, file_url")
               .in("application_id", idsChunk)
-              .ilike("name", "%learning%"),
+              .ilike("name", "%learning%")
+              .order("id"),
           appIds
         );
 
@@ -837,7 +852,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     if (chatAppIds.length === 0) { setChatStatus({}); return; }
     try {
       const { data: threads, error: threadsError } = await queryInChunks(
-        (idsChunk) => supabase.from("chat_threads").select("id, application_id").in("application_id", idsChunk),
+        (idsChunk) => supabase.from("chat_threads").select("id, application_id").in("application_id", idsChunk).order("id"),
         chatAppIds
       );
       if (threadsError || !threads?.length) { setChatStatus({}); return; }
@@ -848,7 +863,8 @@ export default function Applications({ restricted = false, canEdit = true, canAp
             .from("chat_messages")
             .select("thread_id, sender_type, created_at")
             .in("thread_id", idsChunk)
-            .order("created_at", { ascending: false }),
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false }),
         threadIds
       );
       if (messagesError) { setChatStatus({}); return; }
@@ -980,7 +996,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     }
     // Keep an application_date that was already set (e.g. auto-filled when it
     // moved to Under Review, or hand-edited) rather than clobbering it here.
-    const applicationDate = app.application_date || new Date().toISOString().slice(0, 10);
+    const applicationDate = app.application_date || todayIST();
     // Accepted is now the final status — approval already implies the physical
     // process is fulfilled, so this is also what starts the 30-day "eligible
     // for next service" clock (write once, don't clobber an existing value).
@@ -1093,7 +1109,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     // taken up — auto-fill it the first time, but never overwrite a date
     // that's already set (auto-filled earlier, or hand-edited in the table).
     if (newStatus === "Under Review" && !targetApp.application_date) {
-      updatePayload.application_date = new Date().toISOString().slice(0, 10);
+      updatePayload.application_date = todayIST();
     }
     // "Accept" (Draft Submitted -> Under Review) has no separate assignment
     // step anymore — staff just accept. Record who accepted separately from
@@ -1833,7 +1849,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     ws["!cols"] = headers.map((h) => ({ wch: Math.max(12, Math.min(28, h.length + 3)) }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Applications");
-    XLSX.writeFile(wb, `applications-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(wb, `applications-${todayIST()}.xlsx`);
   };
 
   const activeFilterCount = [filterDealer, filterRto, filterAgency, filterService, filterDateFrom, filterDateTo].filter(Boolean).length;
@@ -2145,7 +2161,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
       {!compactView && (
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl dark:bg-slate-900 dark:border-slate-800 overflow-hidden">
         <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="m-scroll w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-500">
             <tr>
               {!restricted && (
@@ -2849,7 +2865,7 @@ function CompactApplicationsTable({ rows, onOpenDetail, onOpenChat, profitOf, rt
   return (
     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="m-scroll w-full text-sm">
           <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-500">
             <tr>
               <th className="text-left font-medium px-3 py-2">Draft / Date</th>
@@ -3187,7 +3203,7 @@ function ImportApplicationsModal({ dealerList, serviceList, rtoList, agencyList,
           return {
             entry_code: r.application_no || `APP-${r.id.slice(0, 8)}`,
             entry_type: "SERVICE",
-            entry_date: r.application_date || new Date().toISOString().slice(0, 10),
+            entry_date: r.application_date || todayIST(),
             dealer_id: r.dealer_id,
             agency_id: r.agency_id || null,
             applicant_name: r.applicant_name,
@@ -3257,7 +3273,7 @@ function ImportApplicationsModal({ dealerList, serviceList, rtoList, agencyList,
             </p>
           </div>
           <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-auto max-h-80 mb-4">
-            <table className="w-full text-xs">
+            <table className="m-scroll w-full text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-500">
                 <tr>
                   <th className="px-3 py-2 text-left">Import?</th>
@@ -3336,7 +3352,7 @@ function ImportApplicationsModal({ dealerList, serviceList, rtoList, agencyList,
                 ⚠ {result.duplicates.length} row{result.duplicates.length !== 1 ? "s" : ""} skipped — draft code already existed:
               </p>
               <div className="mt-1 max-h-32 overflow-auto rounded-lg border border-amber-200 dark:border-amber-500/30 text-xs">
-                <table className="w-full">
+                <table className="m-scroll w-full">
                   <tbody className="divide-y divide-amber-100 dark:divide-amber-500/10">
                     {result.duplicates.map((d, i) => (
                       <tr key={i}>
@@ -3356,7 +3372,7 @@ function ImportApplicationsModal({ dealerList, serviceList, rtoList, agencyList,
                 ✕ {result.failures.length} row{result.failures.length !== 1 ? "s" : ""} failed with an unexpected error:
               </p>
               <div className="mt-1 max-h-32 overflow-auto rounded-lg border border-rose-200 dark:border-rose-500/30 text-xs">
-                <table className="w-full">
+                <table className="m-scroll w-full">
                   <tbody className="divide-y divide-rose-100 dark:divide-rose-500/10">
                     {result.failures.map((f, i) => (
                       <tr key={i}>
@@ -3713,7 +3729,7 @@ function UpdateApplicationsModal({ dealerList, serviceList, rtoList, agencyList,
             </p>
           </div>
           <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-auto max-h-96 mb-4">
-            <table className="w-full text-xs">
+            <table className="m-scroll w-full text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-500">
                 <tr>
                   <th className="px-3 py-2 text-left">Update?</th>
@@ -3793,7 +3809,7 @@ function UpdateApplicationsModal({ dealerList, serviceList, rtoList, agencyList,
                 ✕ {result.failures.length} row{result.failures.length !== 1 ? "s" : ""} failed:
               </p>
               <div className="mt-1 max-h-32 overflow-auto rounded-lg border border-rose-200 dark:border-rose-500/30 text-xs">
-                <table className="w-full">
+                <table className="m-scroll w-full">
                   <tbody className="divide-y divide-rose-100 dark:divide-rose-500/10">
                     {result.failures.map((f, i) => (
                       <tr key={i}>

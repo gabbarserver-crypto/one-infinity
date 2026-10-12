@@ -566,7 +566,7 @@ export default function App() {
         onLogout={() => supabase.auth.signOut()}
       />
       <main
-        className="flex-1 p-8 pb-24 md:pb-8 overflow-y-auto md:h-screen"
+        className="flex-1 min-w-0 p-8 pb-24 md:pb-8 overflow-y-auto md:h-screen"
         style={{ paddingTop: "calc(2rem + env(safe-area-inset-top, 0px))" }}
       >
         <Active

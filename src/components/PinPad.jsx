@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
 // A simple numeric PIN pad — length 4 or 6, shown as filled/empty dots,
 // with an on-screen keypad (works on desktop too via real keyboard input,
@@ -17,6 +17,30 @@ export default function PinPad({ length = 4, onComplete, error, disabled }) {
   };
 
   const backspace = () => setDigits((d) => d.slice(0, -1));
+
+  // Real keyboard support (desktop / Bluetooth keyboards): 0-9 (top row and
+  // numpad) and Backspace. A ref keeps the listener pointed at the latest
+  // push/backspace without re-attaching it on every keystroke.
+  const handlersRef = useRef({ push, backspace });
+  handlersRef.current = { push, backspace };
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target;
+      const tag = t?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.isContentEditable) return;
+      if (/^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+        handlersRef.current.push(e.key);
+      } else if (e.key === "Backspace" || e.key === "Delete") {
+        e.preventDefault();
+        handlersRef.current.backspace();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   return (
     <div>

@@ -742,7 +742,7 @@ function AllPaymentsTable({ payments, loading, query, setQuery, dateFrom, setDat
             {filtered.length} payment{filtered.length !== 1 ? "s" : ""} · ₹{total.toLocaleString("en-IN")} total
           </p>
           <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg max-h-[480px] overflow-y-auto">
-            <table className="w-full text-xs">
+            <table className="m-scroll w-full text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-500 sticky top-0">
                 <tr>
                   {isAdmin && (
@@ -839,7 +839,7 @@ function BankTransactionsTable({ transactions, loading, query, setQuery, dateFro
             {filtered.length} transaction{filtered.length !== 1 ? "s" : ""} · +₹{credits.toLocaleString("en-IN")} in · −₹{debits.toLocaleString("en-IN")} out
           </p>
           <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg max-h-[480px] overflow-y-auto">
-            <table className="w-full text-xs">
+            <table className="m-scroll w-full text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-500 sticky top-0">
                 <tr>
                   <th className="px-3 py-2 text-left whitespace-nowrap">Date</th>
@@ -1114,7 +1114,7 @@ function PaymentsImportModal({ dealers, agencies, onClose, onImported }) {
         {preview.length > 0 && !result && (
           <div>
             <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg mb-4">
-              <table className="w-full text-xs">
+              <table className="m-scroll w-full text-xs">
                 <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500">
                   <tr>
                     <th className="px-3 py-2 text-left">Import?</th>
@@ -1172,7 +1172,7 @@ function PaymentsImportModal({ dealers, agencies, onClose, onImported }) {
                   ⚠ {result.ledgerFailures.length} payment{result.ledgerFailures.length !== 1 ? "s" : ""} saved, but the ledger entry failed to post:
                 </p>
                 <div className="mt-1 max-h-32 overflow-auto rounded-lg border border-rose-200 dark:border-rose-500/30 text-xs">
-                  <table className="w-full">
+                  <table className="m-scroll w-full">
                     <tbody className="divide-y divide-rose-100 dark:divide-rose-500/10">
                       {result.ledgerFailures.map((f, i) => (
                         <tr key={i}>

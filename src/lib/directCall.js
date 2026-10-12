@@ -176,8 +176,15 @@ export function useDirectCall({ identity }) {
     let cancelled = false;
     (async () => {
       try {
-        const channelName = sessionIdRef.current;
-        const { token, appId, uid } = await fetchAgoraToken({ channel: channelName });
+        const peer = remoteIdentityRef.current;
+        // The server derives the channel name from (me, peer, sessionId) and
+        // only hands it to the two participants -- so use the name it
+        // returns rather than the raw session id.
+        const { token, appId, uid, channel: channelName } = await fetchAgoraToken({
+          sessionId: sessionIdRef.current,
+          peerType: peer?.type,
+          peerId: peer?.id,
+        });
         const client = createClient({ mode: "rtc", codec: "vp8" });
         clientRef.current = client;
 
@@ -263,14 +270,11 @@ export function useDirectCall({ identity }) {
   const startCall = useCallback((target, type = "audio") => {
     if (!identityRef.current || status !== "idle" || !target?.id || !target?.type) return;
     setCallError(null);
-    // This doubles as the actual Agora channel name (see the `channelName =
-    // sessionIdRef.current` a bit further down), and Agora channel names
-    // are capped at 64 characters. It used to be built by concatenating
-    // both people's full UUIDs + a timestamp, which is well over 90
-    // characters and made every direct call fail immediately with
-    // AgoraRTCError INVALID_PARAMS. It doesn't need to encode who's on the
-    // call at all — it only needs to be a value both sides agree matches
-    // *this* call attempt, which a plain random UUID (36 chars) already is.
+    // Only a value both sides agree matches *this* call attempt -- a plain
+    // random UUID is enough. It is NOT the Agora channel name any more: the
+    // server derives that from (both participants + this id) when each side
+    // asks for a token (see api/agora-token.js), so nobody who isn't on the
+    // call can get a token for it.
     sessionIdRef.current = crypto.randomUUID();
     remoteIdentityRef.current = { type: target.type, id: target.id };
     setCallType(type);

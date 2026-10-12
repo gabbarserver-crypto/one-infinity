@@ -64,7 +64,7 @@ export default function PaymentsFeeReport() {
 
       <Card>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="m-scroll w-full text-sm">
             <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-500">
               <tr>
                 <th className="text-left font-medium px-3 py-2">Date</th>

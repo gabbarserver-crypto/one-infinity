@@ -28,6 +28,7 @@
 import { supabaseAdmin } from "../_lib/adminAuth.js";
 import { verifyWebhookSignature, fetchOrderStatus } from "./_lib/cashfree.js";
 import { sendPushNotification } from "../_lib/push.js";
+import { todayIST } from "../_lib/dates.js";
 
 export const config = { api: { bodyParser: false } };
 
@@ -130,7 +131,9 @@ export default async function handler(req, res) {
       const { error: ledgerErr } = await supabaseAdmin.from("ledger_entries").insert({
         entry_code: `PMT-${payment.id}`,
         entry_type: "PAYMENT",
-        entry_date: new Date().toISOString().slice(0, 10),
+        // IST calendar date -- this runs on a UTC server, where the plain
+        // toISOString() date is still "yesterday" until 05:30 IST.
+        entry_date: todayIST(),
         dealer_id: qrRequest.dealer_id,
         amount: -qrRequest.amount,
         payment_mode: "UPI",

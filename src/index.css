@@ -46,6 +46,15 @@ html, body, #root {
    this rule stops that content from wrapping first, which is what actually
    forces the table wider than the screen so the wrapper has something to
    scroll. */
+
+/* Mobile: let wide data tables grow past the screen (instead of squeezing
+   columns) so their overflow-x-auto wrapper can be swiped left/right. */
+@media (max-width: 767px) {
+  .m-scroll { width: max-content; min-width: 100%; }
+  .m-scroll th, .m-scroll td { white-space: nowrap; }
+  .overflow-x-auto { -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+}
+
 .scroll-table {
   width: max-content;
   min-width: 100%;

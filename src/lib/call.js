@@ -190,7 +190,7 @@ export function useCall({ threadId, dealerId, identity }) {
     let cancelled = false;
     (async () => {
       try {
-        const { token, appId, uid } = await fetchAgoraToken({ channel: threadId });
+        const { token, appId, uid } = await fetchAgoraToken({ threadId });
         const client = createClient({ mode: "rtc", codec: "vp8" });
         clientRef.current = client;
 

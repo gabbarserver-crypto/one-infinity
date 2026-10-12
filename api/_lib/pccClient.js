@@ -7,6 +7,7 @@
 // Serverless Functions right alongside the frontend.
 import axios from "axios";
 import { createClient } from "@supabase/supabase-js";
+import { fetchAllRows } from "./paging.js";
 
 const DELHI_PCC_BASE_URL =
   process.env.DELHI_PCC_BASE_URL || "https://pcccvr.delhipolice.gov.in/api/PccForm";
@@ -149,11 +150,16 @@ export async function runPccAutoSync() {
     return { checked: 0, updated: 0, errors: ["Supabase not configured"] };
   }
 
-  const { data: allRows, error: fetchError } = await supabaseSync
-    .from("applications")
-    .select("id, pcc_no, applicant_name, father_husband_name, pcc_status, pcc_stage, pcc_certificate_path")
-    .not("pcc_no", "is", null)
-    .not("pcc_status", "in", '("Rejected","Police Case")');
+  // Paged: a single request stops at Supabase's 1000-row cap, so only the
+  // first 1000 PCC applications would ever have been re-checked.
+  const { data: allRows, error: fetchError } = await fetchAllRows(() =>
+    supabaseSync
+      .from("applications")
+      .select("id, pcc_no, applicant_name, father_husband_name, pcc_status, pcc_stage, pcc_certificate_path")
+      .not("pcc_no", "is", null)
+      .not("pcc_status", "in", '("Rejected","Police Case")')
+      .order("id", { ascending: true })
+  );
 
   if (fetchError) {
     console.error("PCC auto-sync: failed to load applications", fetchError.message);

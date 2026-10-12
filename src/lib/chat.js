@@ -14,6 +14,7 @@
 // API; it doesn't itself decide who's allowed to see what.
 
 import { supabase } from "./supabase";
+import { fetchAllRows } from "./fetchAll";
 
 // Get (or lazily create) a thread for a dealer, optionally scoped to one
 // application. Safe to call repeatedly — unique indexes on chat_threads
@@ -39,14 +40,45 @@ export async function getOrCreateThread({ dealerId, applicationId = null }) {
   return created;
 }
 
+// Whole conversation, oldest first. Paged: a single request is cut off at
+// Supabase's 1000-row cap, and because this list is oldest-first the rows
+// that vanished were the NEWEST messages -- a long thread would just stop
+// showing new messages.
 export async function listMessages(threadId) {
-  const { data, error } = await supabase
-    .from("chat_messages")
-    .select("*")
-    .eq("thread_id", threadId)
-    .order("created_at", { ascending: true });
+  const { data, error } = await fetchAllRows(() =>
+    supabase
+      .from("chat_messages")
+      .select("*")
+      .eq("thread_id", threadId)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+  );
   if (error) throw error;
   return data || [];
+}
+
+// Walks messages for the given threads NEWEST FIRST, one page at a time,
+// calling visit(message) for each; visit returns true when it has seen
+// everything it needs, which stops the walk early (so an active inbox costs
+// one page, not the whole table). Used by the "recent chats" lists, which
+// previously fetched all messages for all threads in one request and so
+// lost rows past the 1000-row cap.
+async function walkMessagesNewestFirst(threadIds, columns, visit, { pageSize = 1000, maxPages = 50 } = {}) {
+  for (let page = 0; page < maxPages; page++) {
+    const from = page * pageSize;
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .select(columns)
+      .in("thread_id", threadIds)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    for (const m of data || []) {
+      if (visit(m) === true) return;
+    }
+    if (!data || data.length < pageSize) return;
+  }
 }
 
 export async function sendMessage({ threadId, sender }) {
@@ -166,23 +198,19 @@ export async function listRecentThreadsForStaff(limit = 30) {
   let latestByThread = {};
   let unreadByThread = {};
   if (threadIds.length) {
-    const { data: messages, error: messagesError } = await supabase
-      .from("chat_messages")
-      .select("thread_id, sender_type, body, created_at")
-      .in("thread_id", threadIds)
-      .order("created_at", { ascending: false });
-    if (messagesError) throw messagesError;
     const unreadCountingDone = {};
-    for (const m of messages || []) {
+    let threadsDone = 0;
+    await walkMessagesNewestFirst(threadIds, "id, thread_id, sender_type, body, attachment_url, created_at", (m) => {
       if (!latestByThread[m.thread_id]) latestByThread[m.thread_id] = m;
       // Unread = how many messages in a row (most-recent-first) came from
       // someone other than staff, before we hit one staff actually sent —
       // i.e. how many the staff side hasn't replied to yet.
       if (!unreadCountingDone[m.thread_id]) {
-        if (m.sender_type === "staff") unreadCountingDone[m.thread_id] = true;
+        if (m.sender_type === "staff") { unreadCountingDone[m.thread_id] = true; threadsDone++; }
         else unreadByThread[m.thread_id] = (unreadByThread[m.thread_id] || 0) + 1;
       }
-    }
+      return threadsDone === threadIds.length; // every thread's run is settled
+    });
   }
 
   return (threadRows || []).map((t) => {
@@ -222,21 +250,17 @@ export async function listRecentThreadsForDealer(dealerId, limit = 30) {
   let latestByThread = {};
   let unreadByThread = {};
   if (threadIds.length) {
-    const { data: messages, error: messagesError } = await supabase
-      .from("chat_messages")
-      .select("thread_id, sender_type, body, created_at")
-      .in("thread_id", threadIds)
-      .order("created_at", { ascending: false });
-    if (messagesError) throw messagesError;
     const unreadCountingDone = {};
-    for (const m of messages || []) {
+    let threadsDone = 0;
+    await walkMessagesNewestFirst(threadIds, "id, thread_id, sender_type, body, attachment_url, created_at", (m) => {
       if (!latestByThread[m.thread_id]) latestByThread[m.thread_id] = m;
       // Unread here = messages in a row from staff the dealer hasn't replied to yet.
       if (!unreadCountingDone[m.thread_id]) {
-        if (m.sender_type !== "staff") unreadCountingDone[m.thread_id] = true;
+        if (m.sender_type !== "staff") { unreadCountingDone[m.thread_id] = true; threadsDone++; }
         else unreadByThread[m.thread_id] = (unreadByThread[m.thread_id] || 0) + 1;
       }
-    }
+      return threadsDone === threadIds.length;
+    });
   }
 
   return (threadRows || [])
