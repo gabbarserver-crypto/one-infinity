@@ -12,12 +12,16 @@ import ChatPanel from "../components/ChatPanel";
 import CallLogPanel from "../components/CallLogPanel";
 import { identityFor } from "../lib/chat";
 import { ThreadsTab, CallsTab, NewCallTab, TABS } from "../components/CommsWindow";
+import { usePresence, statusOfDealer } from "../lib/presence";
+import { StatusLine } from "../components/Presence";
 
 export default function Chats({ staff, call }) {
   const [tab, setTab] = useState("chats");
   const [selectedThread, setSelectedThread] = useState(null); // { threadId, dealerId, applicationId, label, dealerName } | null
 
   const identity = identityFor({ staff });
+  const presenceSnap = usePresence();
+  const threadStatus = selectedThread ? statusOfDealer(presenceSnap, selectedThread.dealerId) : null;
 
   // Opening a thread hands it to <ChatPanel/>, which marks it read
   // server-side as soon as it mounts — ThreadsTab's own badge refetches on
@@ -56,15 +60,20 @@ export default function Chats({ staff, call }) {
       <div className="grid md:grid-cols-[340px_1fr] gap-4" style={{ height: "72vh" }}>
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col">
           {tab === "chats" ? (
-            <ThreadsTab variant="staff" scope="general" onOpenThread={openThread} />
+            <ThreadsTab variant="staff" scope="general" onOpenThread={openThread} onScopeChange={changeTab} onNewCall={() => changeTab("new")} />
           ) : tab === "unread" ? (
-            <ThreadsTab variant="staff" scope="unread" onOpenThread={openThread} />
+            <ThreadsTab variant="staff" scope="unread" onOpenThread={openThread} onScopeChange={changeTab} onNewCall={() => changeTab("new")} />
           ) : tab === "customer" ? (
             <ThreadsTab variant="staff" scope="application" onOpenThread={openThread} />
           ) : tab === "calls" ? (
             <CallsTab variant="staff" identity={identity} call={call} onOpenThread={openThread} />
           ) : (
-            <NewCallTab variant="staff" identity={identity} call={call} onOpenThread={openThread} />
+            <>
+              <button onClick={() => changeTab("chats")} className="text-sm font-semibold text-emerald-600 hover:text-emerald-700 px-4 pt-3 text-left shrink-0">
+                ← Back to chats
+              </button>
+              <NewCallTab variant="staff" identity={identity} call={call} onOpenThread={openThread} />
+            </>
           )}
         </div>
 
@@ -73,8 +82,12 @@ export default function Chats({ staff, call }) {
             <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
               {selectedThread ? selectedThread.label : "Select a conversation"}
             </h3>
-            {selectedThread?.dealerName && (
-              <p className="text-xs text-slate-400 dark:text-slate-500 truncate">{selectedThread.dealerName}</p>
+            {selectedThread && (
+              <p className="text-xs text-slate-400 dark:text-slate-500 truncate">
+                {selectedThread.dealerName}
+                {selectedThread.dealerName && (threadStatus.online || threadStatus.lastSeen) ? " · " : ""}
+                <StatusLine status={threadStatus} />
+              </p>
             )}
           </div>
           {selectedThread ? (

@@ -32,6 +32,8 @@ import { Modal } from "./UI";
 import { listRecentThreadsForStaff, listRecentThreadsForDealer } from "../lib/chat";
 import { chatUnreadSummary } from "../lib/serverApi";
 import { subscribeThreadRead } from "../lib/threadReadBus";
+import { startPresence, usePresence, statusForThread, statusOfKey } from "../lib/presence";
+import { OnlineDot, StatusLine } from "./Presence";
 import { fetchAllCallLogs, fetchCallLogs } from "../lib/callLog";
 
 function timeAgo(iso) {
@@ -95,13 +97,11 @@ function SearchBar({ value, onChange, placeholder }) {
 
 const TABS = [
   { key: "chats", label: "Recent Chats", Icon: MessageSquare },
-  { key: "unread", label: "Unread", Icon: Inbox },
   { key: "calls", label: "Recent Calls", Icon: Phone },
-  { key: "new", label: "New Call", Icon: UserPlus },
   { key: "customer", label: "Customer Chat", Icon: Users },
 ];
 
-const TAB_TITLE = { chats: "Recent Chats", unread: "Unread Chats", calls: "Recent Call Logs", new: "New Call", customer: "Customer Chat" };
+const TAB_TITLE = { chats: "Recent Chats", unread: "Recent Chats", calls: "Recent Call Logs", new: "New Call", customer: "Customer Chat" };
 
 const CommsWindow = forwardRef(function CommsWindow({ variant, identity, call, dealerId, dealerName, staff, pendingCount = 0, onExpand }, ref) {
   const [open, setOpen] = useState(false);
@@ -114,6 +114,12 @@ const CommsWindow = forwardRef(function CommsWindow({ variant, identity, call, d
   const [showThreadDetail, setShowThreadDetail] = useState(false);
   const [threadDetail, setThreadDetail] = useState(null);
   const [threadDetailLoading, setThreadDetailLoading] = useState(false);
+
+  // Announce "I'm online" (and keep last-seen fresh) for whoever is signed in.
+  // CommsWindow is mounted for staff, dealers and dealer sub-staff alike, so
+  // this one spot covers everybody.
+  useEffect(() => startPresence(identity, dealerId), [identity?.type, identity?.id, dealerId]);
+  const presenceSnap = usePresence();
 
   // Clicking the name in a thread's header pulls up who you're talking to —
   // for a customer-chat thread (tied to one application) that's the
@@ -213,7 +219,11 @@ const CommsWindow = forwardRef(function CommsWindow({ variant, identity, call, d
   const PanelContent = ({ mobile }) => (
     <>
       <div className="bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 px-4 py-3 flex items-center gap-2.5 shrink-0">
-        {mobile && !selectedThread ? (
+        {tab === "new" && !selectedThread ? (
+          <button onClick={() => setTab("chats")} className="text-sm font-semibold text-emerald-600 hover:text-emerald-700 shrink-0 mr-1 flex items-center gap-1">
+            ← Back
+          </button>
+        ) : mobile && !selectedThread ? (
           <button onClick={closeWindow} className="text-sm font-semibold text-emerald-600 hover:text-emerald-700 shrink-0 mr-1 flex items-center gap-1">
             ← Back
           </button>
@@ -230,19 +240,23 @@ const CommsWindow = forwardRef(function CommsWindow({ variant, identity, call, d
             {headerTitle}
             {selectedThread && <ChevronRight size={15} className="text-slate-300 dark:text-slate-600 shrink-0" />}
           </p>
-          {headerSubtitle && <p className="text-xs text-slate-400 leading-tight truncate mt-0.5">{headerSubtitle}</p>}
+          {selectedThread && (() => {
+            const st = statusForThread(presenceSnap, variant, variant === "staff" ? selectedThread.dealerId : dealerId);
+            return (
+              <p className="text-xs text-slate-400 leading-tight truncate mt-0.5">
+                {headerSubtitle}
+                {headerSubtitle && (st.online || st.lastSeen) ? " · " : ""}
+                <StatusLine status={st} />
+              </p>
+            );
+          })()}
         </div>
-        {!selectedThread && tab === "chats" && (
-          <button onClick={() => setTab("new")} title="Start something new" className="w-8 h-8 shrink-0 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center">
-            <Plus size={16} />
-          </button>
-        )}
         {onExpand && !selectedThread && (
           <button onClick={onExpand} title="Open full Chats inbox" className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 shrink-0">
             Expand
           </button>
         )}
-        {!(mobile && !selectedThread) && (
+        {!(mobile && !selectedThread && tab !== "new") && (
           <button onClick={closeWindow} title="Close" className="w-7 h-7 shrink-0 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-500">
             <X size={16} />
           </button>
@@ -258,9 +272,9 @@ const CommsWindow = forwardRef(function CommsWindow({ variant, identity, call, d
             emptyLabel="No messages here yet."
           />
         ) : tab === "chats" ? (
-          <ThreadsTab variant={variant} dealerId={dealerId} scope="general" onOpenThread={openThread} />
+          <ThreadsTab variant={variant} dealerId={dealerId} scope="general" onOpenThread={openThread} onScopeChange={setTab} onNewCall={() => setTab("new")} />
         ) : tab === "unread" ? (
-          <ThreadsTab variant={variant} dealerId={dealerId} scope="unread" onOpenThread={openThread} />
+          <ThreadsTab variant={variant} dealerId={dealerId} scope="unread" onOpenThread={openThread} onScopeChange={setTab} onNewCall={() => setTab("new")} />
         ) : tab === "customer" ? (
           <ThreadsTab variant={variant} dealerId={dealerId} scope="application" onOpenThread={openThread} />
         ) : tab === "calls" ? (
@@ -452,7 +466,7 @@ export { ThreadsTab, CallsTab, NewCallTab, timeAgo, TABS, TAB_TITLE };
 // fits each: dealer name + last message for general, applicant name +
 // service for per-application.
 // ============================================================
-function ThreadsTab({ variant, dealerId, scope, onOpenThread }) {
+function ThreadsTab({ variant, dealerId, scope, onOpenThread, onScopeChange, onNewCall }) {
   const [threads, setThreads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -463,6 +477,7 @@ function ThreadsTab({ variant, dealerId, scope, onOpenThread }) {
   // listRecentThreadsForStaff/Dealer above, which is really an "awaiting
   // reply" count that doesn't change just because someone read it).
   const [unreadCounts, setUnreadCounts] = useState({});
+  const presenceSnap = usePresence();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -531,12 +546,39 @@ function ThreadsTab({ variant, dealerId, scope, onOpenThread }) {
     return titleOf(t).toLowerCase().includes(q) || (subtitleOf(t) || "").toLowerCase().includes(q);
   });
 
+  // WhatsApp-style filter chips right under the search bar (All / Unread).
+  // Only on the two inbox views — Customer Chat keeps its own plain list.
+  const showChips = (scope === "general" || scope === "unread") && !!onScopeChange;
+  const unreadThreadCount = threads.filter((t) => (unreadCounts[t.threadId] || 0) > 0).length;
+  const showFab = (scope === "general" || scope === "unread") && !!onNewCall;
+
   const placeholder = scope === "application" ? "Search customers…" : scope === "unread" ? "Search unread…" : "Search chats…";
   const emptyLabel = scope === "application" ? "No customer chats yet." : scope === "unread" ? "No unread chats." : "No conversations yet.";
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
+    <div className="flex-1 min-h-0 flex flex-col relative">
       <SearchBar value={query} onChange={setQuery} placeholder={placeholder} />
+      {showChips && (
+        <div className="flex items-center gap-2 px-3 pb-2 shrink-0">
+          {[
+            { key: "chats", label: "All", active: scope === "general" },
+            { key: "unread", label: "Unread", active: scope === "unread", count: unreadThreadCount },
+          ].map((c) => (
+            <button
+              key={c.key}
+              onClick={() => onScopeChange(c.key)}
+              className={`px-3.5 py-1 rounded-full text-xs font-semibold border flex items-center gap-1.5 transition-colors ${
+                c.active
+                  ? "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                  : "bg-transparent text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
+              }`}
+            >
+              {c.label}
+              {c.count > 0 && <span className="text-[10px] font-bold">{c.count}</span>}
+            </button>
+          ))}
+        </div>
+      )}
       {loading ? (
         <p className="text-sm text-slate-400 dark:text-slate-500 text-center py-8">Loading…</p>
       ) : error ? (
@@ -562,6 +604,7 @@ function ThreadsTab({ variant, dealerId, scope, onOpenThread }) {
               >
                 <div className="relative shrink-0">
                   <PastelAvatar name={title} size={40} />
+                  <OnlineDot online={statusForThread(presenceSnap, variant, variant === "staff" ? t.dealerId : dealerId).online} />
                   {!isAppRow(t) && (
                     <span
                       title="Group chat — dealer, their staff, and our team"
@@ -587,6 +630,17 @@ function ThreadsTab({ variant, dealerId, scope, onOpenThread }) {
             );
           })}
         </div>
+      )}
+      {showFab && (
+        <button
+          onClick={onNewCall}
+          title="New call"
+          aria-label="New call"
+          className="absolute bottom-4 right-4 z-10 w-14 h-14 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg flex items-center justify-center"
+        >
+          <Phone size={22} />
+          <Plus size={11} strokeWidth={3} className="absolute top-3 right-3" />
+        </button>
       )}
     </div>
   );
@@ -845,6 +899,7 @@ function DealerNewCallList({ call, dealerId, onOpenThread }) {
 }
 
 function ContactList({ contacts, loading, query, setQuery, call, emptyLabel = "No contacts found.", onMessage }) {
+  const presenceSnap = usePresence();
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <SearchBar value={query} onChange={setQuery} placeholder="Search contacts…" />
@@ -855,12 +910,18 @@ function ContactList({ contacts, loading, query, setQuery, call, emptyLabel = "N
         ) : contacts.length === 0 ? (
           <p className="text-sm text-slate-400 dark:text-slate-500 text-center py-8 px-4">{emptyLabel}</p>
         ) : (
-          contacts.map((c) => (
+          contacts.map((c) => {
+            const st = statusOfKey(presenceSnap, c.type, c.id);
+            return (
             <div key={`${c.type}-${c.id}`} className="px-4 py-2.5 flex items-center gap-3">
-              <PastelAvatar name={c.name} size={36} />
+              <div className="relative shrink-0">
+                <PastelAvatar name={c.name} size={36} />
+                <OnlineDot online={st.online} />
+              </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">{c.name}</p>
                 <p className="text-xs text-emerald-600 dark:text-emerald-400 truncate font-medium">{c.sub}</p>
+                <StatusLine status={st} className="text-[11px]" />
               </div>
               <button
                 onClick={() => call?.startCall(c, "audio")}
@@ -888,7 +949,8 @@ function ContactList({ contacts, loading, query, setQuery, call, emptyLabel = "N
                 </button>
               )}
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
