@@ -24,7 +24,7 @@
 // it. Admin staff, on the other hand, can call/chat with any dealer or
 // dealer_staff — that's the whole point of the support desk.
 import React, { useCallback, useEffect, useImperativeHandle, useMemo, useState, forwardRef } from "react";
-import { MessageCircle, MessageSquare, Users, UserPlus, Phone, Video, PhoneMissed, PhoneOff, Search, X, Plus, Filter, ChevronRight, Inbox } from "lucide-react";
+import { MessageCircle, MessageSquare, Users, UserPlus, Phone, Video, PhoneMissed, PhoneOff, Search, X, Plus, Filter, ChevronRight, Inbox, Wifi } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import ChatPanel from "./ChatPanel";
 import PastelAvatar from "./PastelAvatar";
@@ -99,9 +99,10 @@ const TABS = [
   { key: "chats", label: "Recent Chats", Icon: MessageSquare },
   { key: "calls", label: "Recent Calls", Icon: Phone },
   { key: "customer", label: "Customer Chat", Icon: Users },
+  { key: "online", label: "Online", Icon: Wifi },
 ];
 
-const TAB_TITLE = { chats: "Recent Chats", unread: "Recent Chats", calls: "Recent Call Logs", new: "New Call", customer: "Customer Chat" };
+const TAB_TITLE = { chats: "Recent Chats", unread: "Recent Chats", calls: "Recent Call Logs", new: "New Call", customer: "Customer Chat", online: "Online Now" };
 
 const CommsWindow = forwardRef(function CommsWindow({ variant, identity, call, dealerId, dealerName, staff, pendingCount = 0, onExpand }, ref) {
   const [open, setOpen] = useState(false);
@@ -216,7 +217,7 @@ const CommsWindow = forwardRef(function CommsWindow({ variant, identity, call, d
   // thumb-reachable way out) vs a plain ✕ on the small desktop popup
   // (where "Back" would be a confusing thing to say about a floating
   // widget).
-  const PanelContent = ({ mobile }) => (
+  const renderPanel = (mobile) => (
     <>
       <div className="bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 px-4 py-3 flex items-center gap-2.5 shrink-0">
         {tab === "new" && !selectedThread ? (
@@ -277,6 +278,8 @@ const CommsWindow = forwardRef(function CommsWindow({ variant, identity, call, d
           <ThreadsTab variant={variant} dealerId={dealerId} scope="unread" onOpenThread={openThread} onScopeChange={setTab} onNewCall={() => setTab("new")} />
         ) : tab === "customer" ? (
           <ThreadsTab variant={variant} dealerId={dealerId} scope="application" onOpenThread={openThread} />
+        ) : tab === "online" ? (
+          <OnlineTab variant={variant} call={call} onOpenThread={openThread} />
         ) : tab === "calls" ? (
           <CallsTab variant={variant} dealerId={dealerId} identity={identity} call={call} onOpenThread={openThread} />
         ) : (
@@ -316,7 +319,7 @@ const CommsWindow = forwardRef(function CommsWindow({ variant, identity, call, d
           {/* Mobile: full-screen takeover — avoids the popup's small
               bottom nav sitting on top of the app's own BottomTabBar. */}
           <div className="no-print md:hidden fixed inset-0 z-50 bg-white dark:bg-slate-900 flex flex-col">
-            <PanelContent mobile />
+            {renderPanel(true)}
           </div>
 
           {/* Desktop/tablet: small floating popup above the FAB, unchanged. */}
@@ -325,7 +328,7 @@ const CommsWindow = forwardRef(function CommsWindow({ variant, identity, call, d
             style={{ bottom: "calc(1.25rem + env(safe-area-inset-bottom))", right: "calc(1.25rem + env(safe-area-inset-right))" }}
           >
             <div className="w-96 h-[560px] bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden mb-3">
-              <PanelContent mobile={false} />
+              {renderPanel(false)}
             </div>
           </div>
         </>
@@ -456,7 +459,7 @@ export default CommsWindow;
 // exact same tab bodies — search, avatars, timeAgo, call history, contact
 // directory — behind its own top-level tab bar instead of the floating
 // window's bottom nav, without duplicating any of this logic.
-export { ThreadsTab, CallsTab, NewCallTab, timeAgo, TABS, TAB_TITLE };
+export { ThreadsTab, CallsTab, NewCallTab, OnlineTab, timeAgo, TABS, TAB_TITLE };
 
 // ============================================================
 // Threads tab — powers BOTH "Recent Chats" (scope="general", the dealer's
@@ -898,12 +901,67 @@ function DealerNewCallList({ call, dealerId, onOpenThread }) {
   );
 }
 
-function ContactList({ contacts, loading, query, setQuery, call, emptyLabel = "No contacts found.", onMessage }) {
+// Online tab — ONLY who is online right now. Staff see online dealers and
+// their sub-staff; a dealer / dealer sub-staff only ever sees online admin
+// staff (same permission rule as the New Call tab). Built live from the
+// presence channel (lib/presence.js), so people appear / vanish as they
+// open / close the app.
+function OnlineTab({ variant, call, onOpenThread }) {
+  const snap = usePresence();
+  const [dealerNames, setDealerNames] = useState({});
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    if (variant !== "staff") return;
+    (async () => {
+      const { data } = await supabase.from("dealers").select("id, name, short_name");
+      setDealerNames(Object.fromEntries((data || []).map((d) => [String(d.id), d.short_name || d.name])));
+    })();
+  }, [variant]);
+
+  const contacts = useMemo(() => {
+    const seen = new Set();
+    const list = [];
+    for (const e of snap.online) {
+      if (seen.has(e.key)) continue; // same person with several tabs open
+      seen.add(e.key);
+      if (variant === "staff") {
+        if (e.type === "staff") continue;
+        const dealerName = dealerNames[String(e.dealerId)] || "Dealer";
+        list.push({ type: e.type, id: e.id, name: e.name || dealerName, sub: e.type === "dealer" ? "Dealer" : dealerName, dealerId: e.dealerId });
+      } else {
+        if (e.type !== "staff") continue;
+        list.push({ type: "staff", id: e.id, name: e.name || "Staff", sub: "Our team" });
+      }
+    }
+    const q = query.trim().toLowerCase();
+    return list
+      .filter((c) => !q || c.name.toLowerCase().includes(q) || c.sub.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [snap.online, dealerNames, variant, query]);
+
+  const handleMessage = (c) => onOpenThread?.({ dealerId: c.dealerId, applicationId: null, label: c.name, dealerName: c.sub });
+
+  return (
+    <ContactList
+      contacts={contacts}
+      loading={false}
+      query={query}
+      setQuery={setQuery}
+      call={call}
+      heading={`Online now · ${contacts.length}`}
+      emptyLabel="Abhi koi online nahi hai."
+      onMessage={onOpenThread && variant === "staff" ? handleMessage : null}
+    />
+  );
+}
+
+function ContactList({ contacts, loading, query, setQuery, call, emptyLabel = "No contacts found.", onMessage, heading = "All Contacts" }) {
   const presenceSnap = usePresence();
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <SearchBar value={query} onChange={setQuery} placeholder="Search contacts…" />
-      <p className="px-4 pb-1 text-xs font-semibold text-slate-400">All Contacts</p>
+      <p className="px-4 pb-1 text-xs font-semibold text-slate-400">{heading}</p>
       <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
         {loading ? (
           <p className="text-sm text-slate-400 dark:text-slate-500 text-center py-8">Loading…</p>

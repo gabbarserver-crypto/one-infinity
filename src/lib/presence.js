@@ -80,7 +80,9 @@ async function fetchRows() {
   try {
     const { data, error } = await supabase.from("user_presence").select("user_key, user_type, dealer_id, last_seen");
     if (error) return; // table not created yet → silently no "last seen"
-    state.rows = data || [];
+    const next = data || [];
+    if (JSON.stringify(next) === JSON.stringify(state.rows)) return; // nothing changed → no re-render
+    state.rows = next;
     emit();
   } catch { /* best-effort */ }
 }
@@ -121,7 +123,9 @@ export function startPresence(identity, dealerId) {
         else if (gone) rows = [...rows, { user_key: k, user_type: gone.type, dealer_id: gone.dealerId, last_seen: nowIso }];
       }
     });
+    const sameOnline = entries.length === state.online.length && entries.every((e) => state.online.some((o) => o.key === e.key));
     prevOnline = nowOnline;
+    if (sameOnline && rows === state.rows) return; // same people online → no re-render
     state.online = entries;
     state.rows = rows;
     emit();

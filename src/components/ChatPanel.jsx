@@ -198,6 +198,25 @@ export default function ChatPanel({ dealerId, applicationId = null, identity, em
     };
   }, [dealerId, applicationId]);
 
+  // Coming back to the app: pick up anything missed while it was in the
+  // background (the live connection can drop there) — silently, without the
+  // loading state, so the open chat doesn't flash or lose its place.
+  useEffect(() => {
+    if (!threadId) return undefined;
+    const onVisible = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const fresh = await listMessages(threadId);
+        setMessages((cur) => {
+          const missing = fresh.filter((f) => !cur.some((x) => x.id === f.id));
+          return missing.length ? [...cur, ...missing].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)) : cur;
+        });
+      } catch { /* best-effort */ }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [threadId]);
+
   useEffect(() => {
     if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
   }, [messages]);

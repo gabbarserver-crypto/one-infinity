@@ -415,8 +415,14 @@ export default function App() {
 
   const [passwordRecovery, setPasswordRecovery] = useState(false);
 
+  // Id of the user we've already verified — so the SIGNED_IN / TOKEN_REFRESHED
+  // events Supabase fires every time the app regains focus don't re-run the
+  // whole profile check and swap in fresh objects (which re-rendered the app
+  // under an open chat).
+  const verifiedUserIdRef = useRef(null);
+
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => verifySession(data.session));
+    supabase.auth.getSession().then(({ data }) => { verifiedUserIdRef.current = data.session?.user?.id || null; verifySession(data.session); });
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       // Supabase fires this when someone lands back on the app via a
       // "Forgot Password" email link — show the reset-password screen
@@ -427,6 +433,10 @@ export default function App() {
         return;
       }
       if (event === "SIGNED_OUT") clearSavedNav();
+      if (event === "TOKEN_REFRESHED") return; // same person, just a new token
+      const uid = session?.user?.id || null;
+      if (uid && uid === verifiedUserIdRef.current && (event === "SIGNED_IN" || event === "INITIAL_SESSION")) return; // already verified
+      verifiedUserIdRef.current = uid;
       verifySession(session);
     });
     return () => listener.subscription.unsubscribe();

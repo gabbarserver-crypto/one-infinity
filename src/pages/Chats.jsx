@@ -11,7 +11,7 @@ import React, { useState } from "react";
 import ChatPanel from "../components/ChatPanel";
 import CallLogPanel from "../components/CallLogPanel";
 import { identityFor } from "../lib/chat";
-import { ThreadsTab, CallsTab, NewCallTab, TABS } from "../components/CommsWindow";
+import { ThreadsTab, CallsTab, NewCallTab, OnlineTab, TABS } from "../components/CommsWindow";
 import { usePresence, statusOfDealer } from "../lib/presence";
 import { StatusLine } from "../components/Presence";
 
@@ -65,6 +65,8 @@ export default function Chats({ staff, call }) {
             <ThreadsTab variant="staff" scope="unread" onOpenThread={openThread} onScopeChange={changeTab} onNewCall={() => changeTab("new")} />
           ) : tab === "customer" ? (
             <ThreadsTab variant="staff" scope="application" onOpenThread={openThread} />
+          ) : tab === "online" ? (
+            <OnlineTab variant="staff" call={call} onOpenThread={openThread} />
           ) : tab === "calls" ? (
             <CallsTab variant="staff" identity={identity} call={call} onOpenThread={openThread} />
           ) : (
