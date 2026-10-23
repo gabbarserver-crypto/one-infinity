@@ -136,3 +136,22 @@ export async function chatUnreadSummary() {
 export async function createGamesHandoffCode({ refreshToken }) {
   return post("/api/games-handoff", { action: "create", accessToken: await accessToken(), refreshToken });
 }
+
+// Removes an image's background via the remove.bg API (key stays on the
+// server -- see api/remove-bg.js). Takes a Blob/File (JPEG/PNG, ideally
+// already downsized) and returns a transparent PNG Blob. Throws on any
+// failure (no credits, network, not signed in) so the caller can fall back.
+export async function removeBackgroundApi(blob) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(new Error("Couldn't read image"));
+    r.readAsDataURL(blob);
+  });
+  const base64 = String(dataUrl).split(",")[1] || "";
+  const data = await post("/api/remove-bg", { accessToken: await accessToken(), imageBase64: base64 });
+  const bin = atob(data.imageBase64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: data.mime || "image/png" });
+}

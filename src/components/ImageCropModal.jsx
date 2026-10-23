@@ -8,6 +8,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Modal, PrimaryButton, GhostButton } from "./UI";
 import { loadImageFromFile, cropImage, removeLightBackground, canvasToBlob } from "../lib/imageEdit";
+import { removeBackgroundApi } from "../lib/serverApi";
 
 const HANDLE_SIZE = 22; // touch-friendly hit target, bigger than its visible dot
 
@@ -92,11 +93,33 @@ export default function ImageCropModal({ file, allowBackgroundRemoval = false, o
         height: box.height * scaleY,
       };
       let canvas = cropImage(img, cropRect);
+      let blob;
       if (allowBackgroundRemoval && removeBg) {
-        canvas = removeLightBackground(canvas);
+        // First choice: remove.bg API (proper AI cut-out, server-side key).
+        // Downsize first -- the request body must stay small (Vercel ~4.5 MB)
+        // and remove.bg doesn't need more than ~1500px for a signature.
+        try {
+          const maxSide = 1500;
+          const ratio = Math.min(1, maxSide / Math.max(canvas.width, canvas.height));
+          let sendCanvas = canvas;
+          if (ratio < 1) {
+            sendCanvas = document.createElement("canvas");
+            sendCanvas.width = Math.round(canvas.width * ratio);
+            sendCanvas.height = Math.round(canvas.height * ratio);
+            sendCanvas.getContext("2d").drawImage(canvas, 0, 0, sendCanvas.width, sendCanvas.height);
+          }
+          const jpeg = await canvasToBlob(sendCanvas, "image/jpeg", 0.9);
+          blob = await removeBackgroundApi(jpeg);
+        } catch (apiErr) {
+          // Fallback: the old in-browser whiteness threshold, so the upload
+          // never gets stuck if remove.bg is down / out of credits.
+          console.warn("remove.bg failed, using local fallback:", apiErr?.message);
+          blob = await canvasToBlob(removeLightBackground(canvas), "image/png");
+        }
+      } else {
+        blob = await canvasToBlob(canvas, "image/jpeg", 0.92);
       }
-      const blob = await canvasToBlob(canvas, removeBg ? "image/png" : "image/jpeg", 0.92);
-      const ext = removeBg ? "png" : "jpg";
+      const ext = blob.type === "image/png" ? "png" : "jpg";
       const baseName = file.name.replace(/\.[^.]+$/, "");
       const croppedFile = new File([blob], `${baseName}-cropped.${ext}`, { type: blob.type });
       onDone(croppedFile);
@@ -169,13 +192,13 @@ export default function ImageCropModal({ file, allowBackgroundRemoval = false, o
           {allowBackgroundRemoval && (
             <label className="flex items-center gap-2 mt-3 text-sm text-slate-600 dark:text-slate-300">
               <input type="checkbox" checked={removeBg} onChange={(e) => setRemoveBg(e.target.checked)} className="rounded" />
-              Remove background (makes the paper transparent, keeps just the signature)
+              Remove background (makes the paper transparent, keeps just the signature — takes a few seconds)
             </label>
           )}
 
           <div className="flex gap-2 mt-4">
             <GhostButton onClick={onClose}>Cancel</GhostButton>
-            <PrimaryButton onClick={confirmCrop} disabled={saving}>{saving ? "Processing…" : "Use this"}</PrimaryButton>
+            <PrimaryButton onClick={confirmCrop} disabled={saving}>{saving ? (removeBg ? "Removing background…" : "Processing…") : "Use this"}</PrimaryButton>
           </div>
         </>
       )}

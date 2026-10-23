@@ -19,6 +19,7 @@ import PCCLetterModal from "../components/PCCLetterModal";
 import { DELHI_POLICE_STATIONS } from "../lib/delhiPoliceStations";
 import { ageHighlightClass, validateAgeForService } from "../lib/age";
 import DocUploadDropzone from "../components/DocUploadDropzone";
+import ImageCropModal from "../components/ImageCropModal";
 
 
 const STATUS_TABS = ["All", "Draft Submitted", "Under Review", "On Hold", "Rejected", "Accepted"];
@@ -147,11 +148,14 @@ function EditableSelect({ value, options, onSave, width = "w-32", placeholder = 
 
 const PCC_STATUS_OPTIONS = ["Under Verification", "Certificate Issued", "Rejected", "Police Case"];
 const PCC_STATUS_STYLES = {
-  "Under Verification": "bg-yellow-50 text-yellow-800 border-yellow-300",
-  "Certificate Issued": "bg-green-50 text-green-700 border-green-300",
-  Rejected: "bg-red-50 text-red-700 border-red-300",
-  "Police Case": "bg-orange-50 text-orange-700 border-orange-300",
+  "Under Verification": "bg-yellow-50 text-yellow-800 border-yellow-300 dark:bg-yellow-500/15 dark:text-yellow-200 dark:border-yellow-500/40",
+  "Certificate Issued": "bg-green-50 text-green-700 border-green-300 dark:bg-green-500/15 dark:text-green-300 dark:border-green-500/40",
+  Rejected: "bg-red-50 text-red-700 border-red-300 dark:bg-red-500/15 dark:text-red-300 dark:border-red-500/40",
+  "Police Case": "bg-orange-50 text-orange-700 border-orange-300 dark:bg-orange-500/15 dark:text-orange-300 dark:border-orange-500/40",
 };
+// PCC No entered but no status picked yet — previously this got no colour
+// classes at all, so the number showed as dark text on a dark pill.
+const PCC_NO_STATUS_STYLE = "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-200 dark:border-blue-500/40";
 function PCCNoPopup({ pccNo, pccStatus, pccNotRequired, pccCertificatePath, onSave, onOpenPortal, onCheckStatus, onSetNotRequired, onUploadCertificate }) {
   const [open, setOpen] = useState(false);
   const [localNo, setLocalNo] = useState(pccNo || "");
@@ -179,8 +183,8 @@ function PCCNoPopup({ pccNo, pccStatus, pccNotRequired, pccCertificatePath, onSa
   };
 
   const style = pccStatus
-    ? PCC_STATUS_STYLES[pccStatus] || "bg-blue-50 text-blue-600 border-blue-200"
-    : null;
+    ? PCC_STATUS_STYLES[pccStatus] || PCC_NO_STATUS_STYLE
+    : PCC_NO_STATUS_STYLE;
 
   // Same storage bucket/path convention as PCCStageDots's download link and
   // uploadPccCertificate — only turns the Download button blue/enabled once
@@ -4923,6 +4927,7 @@ function DocumentRow({ doc, applicationId, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [cropFile, setCropFile] = useState(null); // signature image waiting in the crop / remove-background modal
 
   // Storage path is `${applicationId}/${doc.id}-${file.name}` (see
   // uploadFile below), so the original filename the user uploaded is
@@ -4955,7 +4960,7 @@ function DocumentRow({ doc, applicationId, onChanged }) {
   // Lets staff/admin upload directly here too — e.g. the Learning Licence
   // PDF just downloaded from the Sarathi popup above — instead of only
   // being able to Verify/Reject whatever the dealer already sent.
-  const uploadFile = async (file) => {
+  const uploadFileNow = async (file) => {
     if (!file) return;
     if (!applicationId) {
       // Was previously a silent no-op if this component ever got rendered
@@ -4989,6 +4994,17 @@ function DocumentRow({ doc, applicationId, onChanged }) {
       return;
     }
     onChanged?.();
+  };
+
+  // Signature images go through the crop + "Remove background" modal first
+  // (same as the dealer portal); everything else uploads straight away.
+  const uploadFile = (file) => {
+    if (!file) return;
+    if (/sign/i.test(doc.name) && file.type.startsWith("image/")) {
+      setCropFile(file);
+    } else {
+      uploadFileNow(file);
+    }
   };
 
   const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(doc.file_url || "");
@@ -5059,6 +5075,14 @@ function DocumentRow({ doc, applicationId, onChanged }) {
           <DocUploadDropzone busy={uploading} onFile={uploadFile} />
           {uploadError && <p className="text-rose-500 text-xs mt-1">{uploadError}</p>}
         </div>
+      )}
+      {cropFile && (
+        <ImageCropModal
+          file={cropFile}
+          allowBackgroundRemoval
+          onClose={() => setCropFile(null)}
+          onDone={(f) => { setCropFile(null); uploadFileNow(f); }}
+        />
       )}
     </div>
   );
