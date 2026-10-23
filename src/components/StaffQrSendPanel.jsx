@@ -18,6 +18,7 @@ import { createPaymentQr, sendPush } from "../lib/serverApi";
 import { getOrCreateThread, sendMessage, identityFor } from "../lib/chat";
 import { buildPayLink } from "../lib/cashfreeCheckout";
 import { Modal, Field, Input, Select, PrimaryButton, GhostButton, Toast } from "./UI";
+import SearchableSelect from "./SearchableSelect";
 
 // Cashfree requires order_expiry_time to be more than 15 minutes out, so
 // this must stay above 15 -- 10 used to be the default and silently failed
@@ -243,10 +244,12 @@ export default function StaffQrSendPanel({ staff, dealers, onClose }) {
       {step === "form" && (
         <div className="space-y-4">
           <Field label="Dealer" required>
-            <Select value={dealerId} onChange={(e) => { setDealerId(e.target.value); setApplicationId(""); }}>
-              <option value="">— Select dealer —</option>
-              {dealers.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.code})</option>)}
-            </Select>
+            <SearchableSelect
+              value={dealerId}
+              onChange={(id) => { setDealerId(id); setApplicationId(""); }}
+              options={dealers.map((d) => ({ id: d.id, name: `${d.name} (${d.code})` }))}
+              placeholder="Type to search dealer…"
+            />
           </Field>
           <Field label="Application (optional)">
             <Select value={applicationId} onChange={(e) => setApplicationId(e.target.value)} disabled={!dealerId}>
