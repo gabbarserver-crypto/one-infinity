@@ -10,6 +10,7 @@ import * as XLSX from "xlsx";
 import BookAppointmentModal from "../components/BookAppointmentModal";
 import { identityFor } from "../lib/chat";
 import { fetchAllRows } from "../lib/fetchAll";
+import AadhaarFillButton from "../components/AadhaarFillButton";
 import { todayIST, yearIST, istDayStart, istNextDayStart } from "../lib/dates";
 import { isEligibleForAppointment, copyForwardDocuments } from "../lib/nextService";
 import { MessageCircle, Phone, ArrowUp, ArrowDown, ArrowUpDown, Trash2, Link as LinkIcon, Pencil } from "lucide-react";
@@ -3903,6 +3904,7 @@ function NewApplicationModal({ dealerList, serviceList, onClose, onCreate }) {
   const valid = form.dealer_id && form.service_id && form.applicant_name;
   const [ageError, setAgeError] = useState("");
 
+
   const setAnswerKey = (i) => (e) => setAnswers((a) => a.map((row, idx) => idx === i ? { ...row, key: e.target.value } : row));
   const setAnswerValue = (i) => (e) => setAnswers((a) => a.map((row, idx) => idx === i ? { ...row, value: e.target.value } : row));
   const removeAnswer = (i) => setAnswers((a) => a.filter((_, idx) => idx !== i));
@@ -3943,6 +3945,7 @@ function NewApplicationModal({ dealerList, serviceList, onClose, onCreate }) {
           />
         </Field>
       </div>
+      <AadhaarFillButton hint="Please double-check everything before creating." onFill={(patch) => setForm((s) => ({ ...s, ...patch }))} />
       <Field label="Applicant Name" required>
         <Input value={form.applicant_name} onChange={set("applicant_name")} />
       </Field>
@@ -4465,6 +4468,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
           {/* Column 1: applicant details + staff assignment */}
           <div>
             <Card title="Applicant Details" className="mb-4 overflow-hidden">
+              <AadhaarFillButton compact hint="Press “Save Applicant Details” to keep these changes." onFill={(patch) => setApplicant((s) => ({ ...s, ...patch }))} />
               <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                 <Field label="Name"><Input value={applicant.applicant_name} onChange={setApplicantField("applicant_name")} /></Field>
                 <Field label="Father/Husband"><Input value={applicant.father_husband_name} onChange={setApplicantField("father_husband_name")} /></Field>
@@ -4741,6 +4745,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
         </div>
         {QuickActionBar}
         <Card title="Applicant Details" className="mb-4 overflow-hidden">
+          <AadhaarFillButton compact hint="Press “Save Applicant Details” to keep these changes." onFill={(patch) => setApplicant((s) => ({ ...s, ...patch }))} />
           <div className="grid grid-cols-2 gap-x-3 gap-y-1">
             <Field label="Name"><Input value={applicant.applicant_name} onChange={setApplicantField("applicant_name")} /></Field>
             <Field label="Father/Husband"><Input value={applicant.father_husband_name} onChange={setApplicantField("father_husband_name")} /></Field>

@@ -13,6 +13,7 @@
     "android:open": "npx cap open android"
   },
   "dependencies": {
+    "jsqr": "^1.4.0",
     "@aparajita/capacitor-biometric-auth": "^8.0.0",
     "@capacitor/android": "^7.0.0",
     "@capacitor/app": "^7.1.2",

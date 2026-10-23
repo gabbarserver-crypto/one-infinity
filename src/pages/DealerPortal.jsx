@@ -645,15 +645,17 @@ function NewApplicationModal({ dealer, identity, onClose, onCreated }) {
         applicant_name: result.name || s.applicant_name,
         father_husband_name: result.fatherHusbandName || s.father_husband_name,
         address: result.address || s.address,
+        date_of_birth: result.dateOfBirth || s.date_of_birth,
       }));
-      // The QR only carries a year of birth, not the full date — never
-      // silently fabricate a day/month onto official RTO paperwork, so we
-      // just tell the dealer what year to look for and leave the actual
-      // date field for them to set.
+      // Newer (Secure) QRs carry the full date of birth. The older QR only
+      // has a year — never fabricate a day/month on official RTO paperwork,
+      // so in that case just tell the dealer which year to look for.
       setScanNote(
-        result.yearOfBirth
-          ? `Filled from Aadhaar QR. Year of birth on the card: ${result.yearOfBirth} — please set the exact Date of Birth below.`
-          : "Filled from Aadhaar QR. Please double-check the details below."
+        result.dateOfBirth
+          ? "Filled from Aadhaar QR (name, father name, DOB, address). Please double-check before submitting."
+          : result.yearOfBirth
+            ? `Filled from Aadhaar QR. Year of birth on the card: ${result.yearOfBirth} — please set the exact Date of Birth below.`
+            : "Filled from Aadhaar QR. Please double-check the details below."
       );
     } catch (e) {
       setError(e.message || "Couldn't read the Aadhaar QR");

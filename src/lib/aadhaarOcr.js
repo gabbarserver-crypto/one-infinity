@@ -26,7 +26,8 @@ export async function scanAadhaarImage(file, onProgress) {
     throw new Error("OCR isn't set up yet — the tesseract.js package needs to be installed first.");
   }
 
-  const { data } = await Tesseract.recognize(file, "eng", {
+  const input = await preprocessForOcr(file);
+  const { data } = await Tesseract.recognize(input, "eng", {
     logger: (m) => {
       if (onProgress && m.status === "recognizing text") onProgress(Math.round((m.progress || 0) * 100));
     },
@@ -37,6 +38,42 @@ export async function scanAadhaarImage(file, onProgress) {
   }
 
   return parseAadhaarText(text);
+}
+
+// Phone photos are often small, dim or colour-cast. Upscale to ~2200px on the
+// long side, convert to grayscale and stretch the contrast — this alone
+// noticeably improves Tesseract's accuracy. Falls back to the original file
+// if anything about the canvas step fails.
+async function preprocessForOcr(file) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(2.5, 2200 / Math.max(bmp.width, bmp.height));
+    const w = Math.round(bmp.width * scale);
+    const h = Math.round(bmp.height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(bmp, 0, 0, w, h);
+    const img = ctx.getImageData(0, 0, w, h);
+    const d = img.data;
+    let lo = 255, hi = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const g = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) | 0;
+      d[i] = d[i + 1] = d[i + 2] = g;
+      if (g < lo) lo = g;
+      if (g > hi) hi = g;
+    }
+    const range = Math.max(1, hi - lo);
+    for (let i = 0; i < d.length; i += 4) {
+      const v = Math.max(0, Math.min(255, ((d[i] - lo) * 255) / range));
+      d[i] = d[i + 1] = d[i + 2] = v;
+    }
+    ctx.putImageData(img, 0, 0);
+    return canvas;
+  } catch {
+    return file;
+  }
 }
 
 function extractGuardianName(text) {
@@ -81,9 +118,15 @@ function extractName(text) {
 // Grabs everything after an "Address" label up through a 6-digit PIN code
 // — Aadhaar's printed address block always ends with one.
 function extractAddress(text) {
-  const m = text.match(/Address[:\s]*([\s\S]{10,300}?\b\d{6}\b)/i);
-  if (!m) return "";
-  return m[1].replace(/\s*\n\s*/g, ", ").replace(/,\s*,/g, ",").trim();
+  const clean = (t) => t.replace(/\s*\n\s*/g, ", ").replace(/,\s*,/g, ",").replace(/\s{2,}/g, " ").trim();
+  // 1) "Address: ..." label up to the 6-digit PIN
+  let m = text.match(/Address[:\s]*([\s\S]{10,300}?\b\d{6}\b)/i);
+  if (m) return clean(m[1]);
+  // 2) No readable label (common when the label is only in Hindi): the
+  // address block starts with C/O, S/O, D/O or W/O and also ends at the PIN.
+  m = text.match(/((?:C\/O|S\/O|D\/O|W\/O)[:.\s][\s\S]{10,300}?\b\d{6}\b)/i);
+  if (m) return clean(m[1]);
+  return "";
 }
 
 function extractPincode(text) {
