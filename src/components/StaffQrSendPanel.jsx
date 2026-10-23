@@ -23,6 +23,40 @@ import { Modal, Field, Input, Select, PrimaryButton, GhostButton, Toast } from "
 // every "Generate & Send" until raised.
 const DEFAULT_MINUTES = 20;
 
+// Draws the QR onto a white card (with the amount underneath) and returns a
+// PNG blob — a plain QR on a transparent background looks bad when pasted
+// into WhatsApp, and the clipboard only reliably accepts PNG.
+async function buildShareBlob(src, caption) {
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.crossOrigin = "anonymous";
+    i.onload = () => resolve(i);
+    i.onerror = () => reject(new Error("Couldn't load the QR image"));
+    i.src = src;
+  });
+  const size = 480, pad = 28, capH = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size + pad * 2;
+  canvas.height = size + pad * 2 + capH;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, pad, pad, size, size);
+  ctx.fillStyle = "#111";
+  ctx.font = "bold 30px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(caption, canvas.width / 2, size + pad * 2 + 36);
+  return await new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't prepare the QR image"))), "image/png")
+  );
+}
+
+// 10-digit Indian mobile -> wa.me format (91XXXXXXXXXX); "" if unusable.
+function waNumber(raw) {
+  const digits = String(raw || "").replace(/\D/g, "");
+  return digits.length >= 10 ? "91" + digits.slice(-10) : "";
+}
+
 export default function StaffQrSendPanel({ staff, dealers, onClose }) {
   const [step, setStep] = useState("form"); // form | sending | qr | paid | expired
   const [dealerId, setDealerId] = useState("");
@@ -34,6 +68,7 @@ export default function StaffQrSendPanel({ staff, dealers, onClose }) {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [toast, setToast] = useState(null);
   const pollRef = useRef(null);
+  const [localQr, setLocalQr] = useState(""); // QR drawn here from the UPI link when Cashfree sent no image
 
   useEffect(() => {
     (async () => {
@@ -90,6 +125,22 @@ export default function StaffQrSendPanel({ staff, dealers, onClose }) {
     }
   };
 
+  // If Cashfree didn't send a QR image but did send the raw UPI link, draw
+  // the QR here so staff still has something to show/copy/share.
+  useEffect(() => {
+    setLocalQr("");
+    if (!qr || qr.qrImageUrl || !qr.qrRawString) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const QRCode = (await import("qrcode")).default;
+        const url = await QRCode.toDataURL(qr.qrRawString, { margin: 1, width: 480 });
+        if (!cancelled) setLocalQr(url);
+      } catch { /* leave empty; the panel explains what's available */ }
+    })();
+    return () => { cancelled = true; };
+  }, [qr]);
+
   // Live countdown, purely for staff's own view of how long the dealer has
   // left -- Cashfree enforces the real expiry (order_expiry_time), not this.
   useEffect(() => {
@@ -132,6 +183,46 @@ export default function StaffQrSendPanel({ staff, dealers, onClose }) {
       clearInterval(pollRef.current);
     };
   }, [step, qr]);
+
+  const shownQr = qr?.qrImageUrl || localQr;
+  const dealerMobile = dealers.find((d) => d.id === dealerId)?.mobile;
+  const shareText = `Payment QR — ₹${Number(amount).toLocaleString("en-IN")}\nScan with any UPI app (PhonePe, GPay, Paytm, BHIM). Valid for ${minutesValid} minutes.`;
+
+  const copyImage = async () => {
+    try {
+      const blob = await buildShareBlob(shownQr, `₹${Number(amount).toLocaleString("en-IN")} — Scan & Pay`);
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      setToast("QR copied — paste it in WhatsApp (Ctrl+V)");
+      return true;
+    } catch {
+      setToast("Couldn't copy automatically — right-click the QR and choose “Copy image”");
+      return false;
+    }
+  };
+
+  const shareWhatsApp = async () => {
+    // Phone / app: the native share sheet can attach the image straight to WhatsApp.
+    try {
+      const blob = await buildShareBlob(shownQr, `₹${Number(amount).toLocaleString("en-IN")} — Scan & Pay`);
+      const file = new File([blob], "payment-qr.png", { type: "image/png" });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], text: shareText });
+        return;
+      }
+    } catch (e) {
+      if (e?.name === "AbortError") return; // staff closed the share sheet
+    }
+    // Desktop: copy the QR image, open the dealer's WhatsApp chat with the
+    // text prefilled — staff just pastes the image.
+    await copyImage();
+    const num = waNumber(dealerMobile);
+    window.open(`https://wa.me/${num}?text=${encodeURIComponent(shareText)}`, "_blank", "noopener");
+  };
+
+  const copyLink = async (text) => {
+    try { await navigator.clipboard.writeText(text); setToast("Copied"); }
+    catch { setToast("Couldn't copy"); }
+  };
 
   const mm = String(Math.floor(secondsLeft / 60)).padStart(2, "0");
   const ss = String(secondsLeft % 60).padStart(2, "0");
@@ -176,10 +267,32 @@ export default function StaffQrSendPanel({ staff, dealers, onClose }) {
           <p className="text-sm text-emerald-600 dark:text-emerald-400 font-semibold">
             Sent to {dealerName} — via chat{typeof window !== "undefined" ? " and push notification" : ""}.
           </p>
-          {qr.qrImageUrl ? (
-            <img src={qr.qrImageUrl} alt="UPI payment QR" className="mx-auto w-48 h-48 rounded-lg border border-slate-200 dark:border-slate-700" />
+          {shownQr ? (
+            <>
+              <img src={shownQr} alt="UPI payment QR" className="mx-auto w-48 h-48 rounded-lg border border-slate-200 dark:border-slate-700 bg-white p-1" />
+              <div className="flex gap-2">
+                <GhostButton onClick={copyImage} className="flex-1">📋 Copy QR</GhostButton>
+                <PrimaryButton onClick={shareWhatsApp} className="flex-1">WhatsApp</PrimaryButton>
+              </div>
+              {qr.qrRawString && (
+                <button type="button" onClick={() => copyLink(qr.qrRawString)} className="text-xs text-blue-500 hover:underline">Copy UPI payment link</button>
+              )}
+            </>
           ) : (
-            <p className="text-xs text-slate-400 dark:text-slate-500">No embedded QR image for this account — {dealerName} got a "Pay Now" button in chat instead, opening Cashfree's own checkout page.</p>
+            <div className="space-y-2">
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                Cashfree didn't send a QR image for this account, so there's no QR to copy here — {dealerName} got a "Pay Now" button in chat instead, opening Cashfree's own checkout page.
+              </p>
+              {qr.paymentLink && (
+                <div className="flex gap-2">
+                  <GhostButton onClick={() => copyLink(qr.paymentLink)} className="flex-1">🔗 Copy pay link</GhostButton>
+                  <PrimaryButton
+                    onClick={() => window.open(`https://wa.me/${waNumber(dealerMobile)}?text=${encodeURIComponent(shareText + "\n" + qr.paymentLink)}`, "_blank", "noopener")}
+                    className="flex-1"
+                  >WhatsApp</PrimaryButton>
+                </div>
+              )}
+            </div>
           )}
           <p className="text-xl font-bold text-slate-700 dark:text-slate-200">₹{Number(amount).toLocaleString("en-IN")}</p>
           <p className={`text-sm font-mono ${secondsLeft <= 30 ? "text-rose-500" : "text-slate-400"}`}>

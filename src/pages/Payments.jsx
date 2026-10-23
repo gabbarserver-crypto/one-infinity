@@ -45,7 +45,7 @@ export default function Payments({ staff } = {}) {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.from("dealers").select("id, name, code");
+      const { data } = await supabase.from("dealers").select("id, name, code, mobile");
       setDealers(data || []);
       const { data: a } = await supabase.from("agencies").select("id, name, code");
       setAgencies(a || []);

@@ -135,6 +135,9 @@ export default async function handler(req, res) {
       // checkout (cashfree.checkout({ paymentSessionId, ... })) whenever
       // qrImageUrl above is null.
       paymentSessionId: order.payment_session_id,
+      // Some Cashfree API versions also return a ready-made hosted payment link
+      // on the order; passed along (if present) so staff can share it manually.
+      paymentLink: order.payment_link || null,
       cashfreeMode: process.env.CASHFREE_ENV === "PRODUCTION" ? "production" : "sandbox",
       expiresAt: expiresAt.toISOString(),
       cfOrderId,
