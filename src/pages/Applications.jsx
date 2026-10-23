@@ -905,7 +905,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
       setDealerList(d || []);
       const { data: summaries } = await supabase.from("dealer_ledger_summary").select("dealer_id, credit_limit, running_balance");
       setDealerHold(Object.fromEntries((summaries || []).filter((s) => (Number(s.credit_limit || 0) + Number(s.running_balance || 0)) <= 0).map((s) => [s.dealer_id, true])));
-      const { data: sv } = await supabase.from("services").select("id, parent_service, short_name, pcc_required, rto_required, agency_required, slot_booking_required, chat_in_app, age_limit_required, min_age").order("parent_service");
+      const { data: sv } = await supabase.from("services").select("id, parent_service, short_name, pcc_required, rto_required, agency_required, slot_booking_required, chat_in_app, age_limit_required, min_age, is_active").order("parent_service");
       setServiceList(sv || []);
       const { data: rt } = await supabase.from("rtos").select("id, name, code, type").order("name");
       setRtoList(rt || []);
@@ -3937,7 +3937,7 @@ function NewApplicationModal({ dealerList, serviceList, onClose, onCreate }) {
         <Field label="Service" required>
           <SearchableSelect
             value={form.service_id}
-            options={serviceList.map((s) => ({ id: s.id, name: serviceLabel(s) }))}
+            options={serviceList.filter((s) => s.is_active !== false).map((s) => ({ id: s.id, name: serviceLabel(s) }))}
             onChange={(id) => setForm((s) => ({ ...s, service_id: id }))}
             placeholder="Search or select a service…"
           />

@@ -50,7 +50,7 @@ export default function PCCLetterModal({ app, onClose }) {
   });
   const [addressee, setAddressee] = useState(DEFAULT_ADDRESSEE);
 
-  const signatureDoc = (app.docs || []).find((d) => /signature/i.test(d.name) && d.file_url);
+  const signatureDoc = (app.docs || []).find((d) => /sign/i.test(d.name) && d.file_url);
 
   useEffect(() => {
     const cleanup = () => document.body.classList.remove("print-isolate");

@@ -370,6 +370,20 @@ function ServiceMaster({ notify }) {
     setOpen(false); setEditing(null); load();
   };
 
+  // Active / Inactive switch straight from the list — no need to open the
+  // service. Updates the row immediately and rolls back if the save fails.
+  const toggleActive = async (row) => {
+    const next = row.is_active === false;
+    setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, is_active: next } : r)));
+    const { error } = await supabase.from("services").update({ is_active: next }).eq("id", row.id);
+    if (error) {
+      setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, is_active: !next } : r)));
+      notify("Couldn't update: " + error.message);
+      return;
+    }
+    notify(`${row.parent_service} ${next ? "activated" : "deactivated"}`);
+  };
+
   return (
     <>
       <ListTable
@@ -377,6 +391,21 @@ function ServiceMaster({ notify }) {
         columns={[
           { key: "parent_service", label: "Name" },
           { key: "short_name", label: "Short Name" },
+          { key: "is_active", label: "Active", render: (r) => {
+            const on = r.is_active !== false;
+            return (
+              <button
+                type="button"
+                role="switch"
+                aria-checked={on}
+                onClick={() => toggleActive(r)}
+                title={on ? "Active — click to deactivate" : "Inactive — click to activate"}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${on ? "bg-blue-600" : "bg-slate-400 dark:bg-slate-600"}`}
+              >
+                <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${on ? "translate-x-5" : "translate-x-0.5"}`} />
+              </button>
+            );
+          } },
         ]}
         onAdd={() => { setEditing(null); setOpen(true); }}
         onEdit={(r) => { setEditing(r); setOpen(true); }}
