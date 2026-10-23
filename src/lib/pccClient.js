@@ -7,90 +7,16 @@
 // Serverless Functions right alongside the frontend.
 import axios from "axios";
 import { createClient } from "@supabase/supabase-js";
-import { fetchAllRows } from "./paging.js";
+import { fetchAllRows } from "./fetchAll";
 
 const DELHI_PCC_BASE_URL =
   process.env.DELHI_PCC_BASE_URL || "https://pcccvr.delhipolice.gov.in/api/PccForm";
-const PORTAL_ORIGIN = process.env.DELHI_PCC_ORIGIN || "https://pcccvr.delhipolice.gov.in";
-const CSRF_URL = `${PORTAL_ORIGIN}/api/Authorization/get-csrf-token`;
-
-// The portal's public Track Application page now fetches a CSRF token first
-// and sends it back on every PccForm call. We don't know for sure which
-// header name it uses, so unless PCC_CSRF_HEADER is set we send the token
-// under the usual names -- extra headers are harmless to the server.
-const CSRF_HEADER_NAMES = process.env.PCC_CSRF_HEADER
-  ? [process.env.PCC_CSRF_HEADER]
-  : ["X-CSRF-TOKEN", "X-XSRF-TOKEN", "RequestVerificationToken", "CSRF-TOKEN"];
-
-const BROWSER_HEADERS = {
-  Accept: "application/json, text/plain, */*",
-  Origin: PORTAL_ORIGIN,
-  Referer: `${PORTAL_ORIGIN}/login`,
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-};
 
 const delhiClient = axios.create({
   baseURL: DELHI_PCC_BASE_URL,
   timeout: 15000,
   headers: { "Content-Type": "application/json" },
 });
-
-// ---- Portal session (CSRF token + cookies) -------------------------------
-// This is the same anonymous handshake the public page does. No login, no
-// captcha involved. One session can be reused for many lookups.
-function mergeSetCookie(jar, setCookie) {
-  for (const line of setCookie || []) {
-    const [pair] = String(line).split(";");
-    const i = pair.indexOf("=");
-    if (i > 0) jar.set(pair.slice(0, i).trim(), pair.slice(i + 1).trim());
-  }
-}
-
-function cookieHeader(jar) {
-  return [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
-}
-
-export async function createPortalSession() {
-  const session = { token: null, jar: new Map() };
-  session.refresh = async () => {
-    session.jar.clear();
-    const r = await axios.get(CSRF_URL, { timeout: 15000, headers: BROWSER_HEADERS });
-    const token = r.data?.token;
-    if (!token) throw new Error("Portal did not return a CSRF token");
-    session.token = token;
-    mergeSetCookie(session.jar, r.headers["set-cookie"]);
-  };
-  await session.refresh();
-  return session;
-}
-
-function sessionHeaders(session) {
-  const headers = { ...BROWSER_HEADERS };
-  for (const name of CSRF_HEADER_NAMES) headers[name] = session.token;
-  if (session.jar.size) headers.Cookie = cookieHeader(session.jar);
-  return headers;
-}
-
-// POST to a PccForm endpoint inside a session. If the portal rejects the
-// token (expired / mismatched), fetch a fresh one and retry exactly once.
-async function portalPost(session, path, body) {
-  const attempt = async () => {
-    const r = await delhiClient.post(path, body, { headers: sessionHeaders(session) });
-    mergeSetCookie(session.jar, r.headers["set-cookie"]);
-    return r;
-  };
-  try {
-    return await attempt();
-  } catch (e) {
-    const code = e.response?.status;
-    if (code === 400 || code === 401 || code === 403 || code === 419) {
-      await session.refresh();
-      return await attempt();
-    }
-    throw e;
-  }
-}
 
 export const supabaseSync =
   process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -114,18 +40,14 @@ function stripKinPrefix(name) {
 }
 
 /**
- * Mirrors what the Delhi Police portal's public "Track Application" page
- * does (no login, no captcha):
- *   0. GET  /api/Authorization/get-csrf-token
- *   1. POST /search-pcc-application     { applicationNumber, applicantName, guardianName }
- *   2. POST /get-pcc-application-status { applicationId, applicationNumber, applicantName, guardianName }
- * Pass an existing `session` (from createPortalSession) to reuse it across
- * many applications; otherwise one is created for this call.
+ * Mirrors exactly what the Delhi Police portal's own public "Track
+ * Application" page calls:
+ *   1. POST /search-pcc-application    { applicationNumber, applicantName, guardianName }
+ *   2. POST /get-pcc-applicant-details { applicationID }   <- capital ID
+ *   3. POST /get-pcc-application-status { applicationId }  <- lowercase d
  */
-export async function lookupPccStatus({ applicationNumber, applicantName, guardianName }, session = null) {
-  const s = session || (await createPortalSession());
-
-  const searchResult = await portalPost(s, "/search-pcc-application", {
+export async function lookupPccStatus({ applicationNumber, applicantName, guardianName }) {
+  const searchResult = await delhiClient.post("/search-pcc-application", {
     applicationNumber,
     applicantName,
     guardianName,
@@ -136,45 +58,22 @@ export async function lookupPccStatus({ applicationNumber, applicantName, guardi
     return { success: false, stage: "search", raw: searchResult.data };
   }
 
-  const statusOutcome = await fetchApplicationStatus(s, application);
+  const id = String(application.applicationID);
+
+  const [detailsResult, statusResult] = await Promise.allSettled([
+    delhiClient.post("/get-pcc-applicant-details", { applicationID: id }),
+    delhiClient.post("/get-pcc-application-status", { applicationId: id }),
+  ]);
 
   return {
     success: true,
     application,
-    status: statusOutcome.data,
-    statusError: statusOutcome.error,
-    // When the portal answered OK but without a usable "data" object, hand its
-    // raw reply back so the UI can show what actually came back.
-    statusRaw: statusOutcome.data ? null : statusOutcome.raw,
+    details: detailsResult.status === "fulfilled" ? detailsResult.value.data?.data || null : null,
+    status: statusResult.status === "fulfilled" ? statusResult.value.data?.data || null : null,
+    statusError: statusResult.status === "rejected"
+      ? { message: statusResult.reason.message, body: statusResult.reason.response?.data || null }
+      : null,
   };
-}
-
-async function fetchApplicationStatus(session, application) {
-  const id = String(application.applicationID);
-  // First shape is exactly what the portal's own page sends now; the second
-  // is the older id-only shape, kept as a fallback.
-  const variants = [
-    {
-      applicationId: id,
-      applicationNumber: application.applicationNumber,
-      applicantName: application.applicantName,
-      guardianName: application.guardianName,
-    },
-    { applicationId: id },
-  ];
-
-  let raw = null;
-  let error = null;
-  for (const body of variants) {
-    try {
-      const r = await portalPost(session, "/get-pcc-application-status", body);
-      if (r.data?.data) return { data: r.data.data, raw: null, error: null };
-      raw = r.data ?? null;
-    } catch (e) {
-      error = { message: e.message, body: e.response?.data || null };
-    }
-  }
-  return { data: null, raw, error: raw ? null : error };
 }
 
 // Delhi Police's timeline "stage" values (Pending, Assigned, Field Verified,
@@ -212,40 +111,55 @@ export function buildStageSnapshot(status) {
 // "application-documents" Supabase Storage bucket the rest of the app
 // already uses (see src/lib/chat.js), under pcc-certificates/<applicationId>.pdf.
 //
-// The certificateUrl carries a short-lived token, so call this right after
-// the status lookup that returned it, with the same session. It is not yet
-// confirmed that the portal serves this URL without a login: whatever comes
-// back is only stored if it really is a PDF (a login/error page is rejected),
-// and on failure the manual "Save Certificate to DB" upload still works.
-export async function downloadAndStoreCertificate({ applicationId, url, session = null }) {
+// IMPORTANT CAVEAT: the certificateUrl the portal returns is, per
+// PCCStatusCheckModal.jsx, only good for someone with an active logged-in
+// browser session on pcccvr.delhipolice.gov.in. This serverless function has
+// no such session, so this will very likely fail with a 401 until/unless a
+// portal service-account login is wired in here too (not yet confirmed —
+// same "needs a real example from you" situation as the status endpoint
+// originally was). It's still worth attempting on every sync in case the
+// portal ever serves it without auth, but don't rely on it — the manual
+// "Upload Certificate" fallback in the UI is the reliable path today.
+export async function downloadAndStoreCertificate({ applicationId, url }) {
   if (!supabaseSync) throw new Error("Supabase not configured");
 
-  const headers = session ? sessionHeaders(session) : BROWSER_HEADERS;
-  const resp = await axios.get(url, { responseType: "arraybuffer", timeout: 20000, headers });
-
-  const buf = Buffer.from(resp.data);
-  if (buf.subarray(0, 4).toString("latin1") !== "%PDF") {
-    throw new Error(`portal did not return a PDF (HTTP ${resp.status}, ${resp.headers["content-type"] || "unknown type"})`);
-  }
-
+  const resp = await axios.get(url, { responseType: "arraybuffer", timeout: 20000 });
   const path = `pcc-certificates/${applicationId}.pdf`;
+
   const { error } = await supabaseSync.storage
     .from("application-documents")
-    .upload(path, buf, { contentType: "application/pdf", upsert: true });
+    .upload(path, resp.data, { contentType: "application/pdf", upsert: true });
 
   if (error) throw new Error(error.message);
   return path;
 }
 
+// Vercel's serverless functions have a hard wall-clock limit (maxDuration
+// below, currently 60s — see vercel.json/this file's config export). With
+// enough open applications, checking every single one in one run — each a
+// real round trip to the Delhi Police portal plus a deliberate delay so we
+// don't hammer it — can easily exceed that and get killed mid-run
+// (FUNCTION_INVOCATION_TIMEOUT), silently dropping every update from that
+// run, including any DB writes.
+//
+// Fix: process oldest-synced-first (so a never-yet-checked row always wins
+// over one we already know the status of), and stop with time to spare
+// rather than letting Vercel kill us — whatever's left over just gets
+// picked up on the next cron run a couple hours later. Over a few runs,
+// every application still gets covered; no single run risks timing out.
+const TIME_BUDGET_MS = 45_000; // leaves ~15s headroom under the 60s cap
+const REQUEST_DELAY_MS = 200; // politeness delay between portal hits
+
 /**
- * Re-checks every application that has a PCC number and isn't already fully
- * done, and writes the current stage/timeline (and pcc_status, kept in sync
- * for the existing dropdown/filters/reports) back onto the row. Once a row
- * reaches "Certificate Issued" AND the certificate has actually been
- * captured (pcc_certificate_path set), it's left alone — until then it
- * keeps getting re-checked every run, specifically so a Certificate Issued
- * row whose auto-download failed (see downloadAndStoreCertificate's caveat)
- * gets retried on the next run instead of being dropped.
+ * Re-checks open applications (oldest-synced first, time-budgeted so a run
+ * never times out) and writes the current stage/timeline (and pcc_status,
+ * kept in sync for the existing dropdown/filters/reports) back onto each
+ * row. Once a row reaches "Certificate Issued" AND the certificate has
+ * actually been captured (pcc_certificate_path set), it's left alone —
+ * until then it keeps getting re-checked every run, specifically so a
+ * Certificate Issued row whose auto-download failed (see
+ * downloadAndStoreCertificate's caveat) gets retried on a later run instead
+ * of being dropped.
  */
 export async function runPccAutoSync() {
   if (!supabaseSync) {
@@ -258,9 +172,10 @@ export async function runPccAutoSync() {
   const { data: allRows, error: fetchError } = await fetchAllRows(() =>
     supabaseSync
       .from("applications")
-      .select("id, pcc_no, applicant_name, father_husband_name, pcc_status, pcc_stage, pcc_certificate_path")
+      .select("id, pcc_no, applicant_name, father_husband_name, pcc_status, pcc_stage, pcc_certificate_path, pcc_last_synced_at")
       .not("pcc_no", "is", null)
       .not("pcc_status", "in", '("Rejected","Police Case")')
+      .order("pcc_last_synced_at", { ascending: true, nullsFirst: true })
       .order("id", { ascending: true })
   );
 
@@ -270,39 +185,39 @@ export async function runPccAutoSync() {
   }
 
   // Fully done = certificate issued AND we already have the PDF stored — no
-  // point re-hitting the portal for those every 2 hours forever.
-  const rows = (allRows || []).filter(
+  // point re-hitting the portal for those every run forever.
+  const pending = (allRows || []).filter(
     (r) => !(r.pcc_stage === "Certificate Issued" && r.pcc_certificate_path)
   );
 
+  const startedAt = Date.now();
+  let processed = 0;
   let updated = 0;
   let certificatesCaptured = 0;
   const errors = [];
 
-  let session;
-  try {
-    session = await createPortalSession();
-  } catch (e) {
-    console.error("PCC auto-sync: could not start a portal session:", e.message);
-    return { checked: 0, updated: 0, errors: [`portal session: ${e.message}`] };
-  }
+  for (const row of pending) {
+    if (Date.now() - startedAt > TIME_BUDGET_MS) {
+      console.log(`PCC auto-sync: stopping early at time budget — ${pending.length - processed} rows left for next run`);
+      break;
+    }
 
-  for (const row of rows) {
+    processed += 1;
     const applicationNumber = normalizePccApplicationNumber(row.pcc_no);
     const guardianName = stripKinPrefix(row.father_husband_name || "");
 
     try {
-      const result = await lookupPccStatus(
-        { applicationNumber, applicantName: row.applicant_name, guardianName },
-        session
-      );
+      const result = await lookupPccStatus({
+        applicationNumber,
+        applicantName: row.applicant_name,
+        guardianName,
+      });
 
-      if (!result.success) continue; // not found on portal this round, leave as-is
-
-      // Portal found the application but sent no status: leave the row alone,
-      // including pcc_last_synced_at, so "Synced ..." only ever means real data.
-      if (!result.status) {
-        errors.push(`row ${row.id} (${row.pcc_no}): portal returned no status`);
+      if (!result.success) {
+        // Still touch pcc_last_synced_at so a row that's consistently not
+        // found on the portal doesn't permanently hog the front of the
+        // oldest-first queue — it'll cycle back after everything else does.
+        await supabaseSync.from("applications").update({ pcc_last_synced_at: new Date().toISOString() }).eq("id", row.id);
         continue;
       }
 
@@ -319,12 +234,11 @@ export async function runPccAutoSync() {
           updates.pcc_certificate_path = await downloadAndStoreCertificate({
             applicationId: row.id,
             url: result.status.certificateUrl,
-            session,
           });
           certificatesCaptured += 1;
         } catch (certErr) {
-          // Logged, not fatal -- retried on the next run (see the note on
-          // downloadAndStoreCertificate).
+          // Expected to fail without a portal session (see caveat on
+          // downloadAndStoreCertificate) — logged, not fatal, retried next run.
           errors.push(`row ${row.id} certificate download: ${certErr.message}`);
         }
       }
@@ -343,12 +257,11 @@ export async function runPccAutoSync() {
       errors.push(`row ${row.id} (${row.pcc_no}): ${err.message}`);
     }
 
-    // Small delay between requests so we don't hammer the portal.
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, REQUEST_DELAY_MS));
   }
 
   console.log(
-    `PCC auto-sync: checked ${rows.length}, updated ${updated}, certificates captured ${certificatesCaptured}, errors ${errors.length}`
+    `PCC auto-sync: ${processed}/${pending.length} checked this run, ${updated} updated, ${certificatesCaptured} certificates captured, ${errors.length} errors`
   );
-  return { checked: rows.length, updated, certificatesCaptured, errors };
+  return { totalPending: pending.length, checked: processed, updated, certificatesCaptured, errors };
 }
