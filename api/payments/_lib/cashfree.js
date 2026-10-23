@@ -44,6 +44,23 @@ export function cashfreeConfigured() {
   return !!(process.env.CASHFREE_CLIENT_ID && process.env.CASHFREE_CLIENT_SECRET);
 }
 
+// Builds a readable error from a failed Cashfree response so the real reason
+// (e.g. "authentication Failed", an invalid field, an IP not whitelisted)
+// reaches the UI/logs instead of just a bare status code. Never includes
+// credentials -- only what Cashfree itself said back.
+function cashfreeError(label, res, data) {
+  const bits = [data?.message, data?.code || data?.type].filter(Boolean);
+  const detail = bits.length ? bits.join(" / ") : JSON.stringify(data || {}).slice(0, 200);
+  return new Error(`Cashfree ${label} failed (${res.status}): ${detail}`);
+}
+
+// Cashfree wants a plain 10-digit mobile number. Dealer records often hold
+// "+91 98765 43210", "098765-43210" etc., which Cashfree rejects.
+function cleanPhone(raw) {
+  const digits = String(raw || "").replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : "9999999999";
+}
+
 // Creates a Cashfree order for this exact amount, expiring at expiresAtIso.
 // This expiry is what actually enforces "the QR only lives for N minutes" --
 // Cashfree itself will reject a payment attempt against an expired order,
@@ -60,7 +77,7 @@ export async function createOrder({ orderId, amount, dealer, expiresAtIso, webho
       customer_details: {
         customer_id: dealer.id,
         customer_name: dealer.name,
-        customer_phone: dealer.mobile || "9999999999",
+        customer_phone: cleanPhone(dealer.mobile),
         customer_email: dealer.email || undefined,
       },
       order_meta: {
@@ -69,7 +86,7 @@ export async function createOrder({ orderId, amount, dealer, expiresAtIso, webho
     }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.message || `Cashfree create-order failed (${res.status})`);
+  if (!res.ok) throw cashfreeError("create-order", res, data);
   return data; // { order_id, cf_order_id, payment_session_id, ... }
 }
 
@@ -86,7 +103,7 @@ export async function generateUpiQr({ paymentSessionId }) {
     }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.message || `Cashfree QR generation failed (${res.status})`);
+  if (!res.ok) throw cashfreeError("QR generation", res, data);
   return extractQrPayload(data);
 }
 
@@ -112,7 +129,7 @@ export async function fetchOrderStatus(orderId) {
     headers: authHeaders(),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.message || `Cashfree fetch-order failed (${res.status})`);
+  if (!res.ok) throw cashfreeError("fetch-order", res, data);
   return data; // { order_status: 'PAID' | 'ACTIVE' | 'EXPIRED' | ..., ... }
 }
 
