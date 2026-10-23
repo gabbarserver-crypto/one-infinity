@@ -208,6 +208,40 @@ export function buildStageSnapshot(status) {
   return { currentStage, timeline };
 }
 
+// Fetches the data the portal's own certificate page renders from
+// (GET /api/SuperAdmin/pcc-certificate-data/<applicationID>). Returns the
+// portal's fields without the base64 applicant photo, so the row stays small.
+// This is a data record only -- it does not build a certificate PDF.
+export async function fetchCertificateData(session, application) {
+  const r = await axios.get(
+    `${PORTAL_ORIGIN}/api/SuperAdmin/pcc-certificate-data/${encodeURIComponent(application.applicationID)}`,
+    {
+      timeout: 15000,
+      headers: sessionHeaders(session),
+      params: {
+        applicationNumber: application.applicationNumber,
+        applicantName: application.applicantName,
+        guardianName: application.guardianName,
+      },
+    }
+  );
+  mergeSetCookie(session.jar, r.headers["set-cookie"]);
+  const d = r.data?.success ? r.data.data : null;
+  if (!d || !d.pccNo) throw new Error("portal returned no certificate data");
+
+  const parseJson = (v) => {
+    if (typeof v !== "string") return v ?? null;
+    try { return JSON.parse(v); } catch { return v; }
+  };
+  const { applicantPhotoPath, qrCodeData, addressDetails, criminalCaseDetails, ...rest } = d;
+  return {
+    ...rest,
+    addressDetails: parseJson(addressDetails),
+    criminalCaseDetails: parseJson(criminalCaseDetails),
+    qrCodeData: parseJson(qrCodeData),
+  };
+}
+
 // Downloads the certificate PDF and stores it in the same
 // "application-documents" Supabase Storage bucket the rest of the app
 // already uses (see src/lib/chat.js), under pcc-certificates/<applicationId>.pdf.
@@ -258,7 +292,7 @@ export async function runPccAutoSync() {
   const { data: allRows, error: fetchError } = await fetchAllRows(() =>
     supabaseSync
       .from("applications")
-      .select("id, pcc_no, applicant_name, father_husband_name, pcc_status, pcc_stage, pcc_certificate_path")
+      .select("id, pcc_no, applicant_name, father_husband_name, pcc_status, pcc_stage, pcc_certificate_path, pcc_certificate_data")
       .not("pcc_no", "is", null)
       .not("pcc_status", "in", '("Rejected","Police Case")')
       .order("id", { ascending: true })
@@ -272,7 +306,7 @@ export async function runPccAutoSync() {
   // Fully done = certificate issued AND we already have the PDF stored — no
   // point re-hitting the portal for those every 2 hours forever.
   const rows = (allRows || []).filter(
-    (r) => !(r.pcc_stage === "Certificate Issued" && r.pcc_certificate_path)
+    (r) => !(r.pcc_stage === "Certificate Issued" && r.pcc_certificate_path && r.pcc_certificate_data)
   );
 
   let updated = 0;
@@ -326,6 +360,15 @@ export async function runPccAutoSync() {
           // Logged, not fatal -- retried on the next run (see the note on
           // downloadAndStoreCertificate).
           errors.push(`row ${row.id} certificate download: ${certErr.message}`);
+        }
+      }
+
+      if (currentStage === "Certificate Issued" && !row.pcc_certificate_data) {
+        try {
+          updates.pcc_certificate_data = await fetchCertificateData(session, result.application);
+          updates.pcc_certificate_data_fetched_at = new Date().toISOString();
+        } catch (dataErr) {
+          errors.push(`row ${row.id} certificate data: ${dataErr.message}`);
         }
       }
 

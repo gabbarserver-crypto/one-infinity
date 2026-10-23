@@ -3,7 +3,7 @@
 // can offer the same "Download Certificate" flow next to a PCC document
 // (mirroring the "Download Learning" / Sarathi button), not just the
 // admin-side PCC No column.
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Modal, Field, Input, PrimaryButton } from "./UI";
 import { supabase } from "../lib/supabase";
 
@@ -98,6 +98,18 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved }
   const [savingCert, setSavingCert] = useState(false);
   const [certSaved, setCertSaved] = useState(Boolean(row.pcc_certificate_path));
   const fileInputRef = React.useRef(null);
+  // Data the portal returned for the issued certificate (saved by auto-sync).
+  const [certData, setCertData] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    supabase
+      .from("applications")
+      .select("pcc_certificate_data")
+      .eq("id", row.id)
+      .maybeSingle()
+      .then(({ data }) => { if (alive) setCertData(data?.pcc_certificate_data || null); });
+    return () => { alive = false; };
+  }, [row.id]);
 
   const handleCertFileChosen = async (e) => {
     const file = e.target.files?.[0];
@@ -288,6 +300,35 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved }
                 portal login needed). Auto-sync also saves the certificate to our records by
                 itself; if it hasn't yet, download the PDF here and use "Save Certificate to DB".
               </p>
+            )}
+
+            {certData && (
+              <div className="mt-4 rounded-lg border border-slate-200 dark:border-slate-800 p-3 text-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-semibold text-slate-700 dark:text-slate-300">PCC Details (from portal)</h4>
+                  <span className="text-xs text-slate-400 dark:text-slate-500">Record only — not the official certificate</span>
+                </div>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                  {[
+                    ["Certificate No.", certData.pccNo],
+                    ["Issued On", certData.issuedOn],
+                    ["Applicant", certData.applicantName],
+                    ["Father's Name", certData.fatherName],
+                    ["Purpose", certData.purposeOfPcc],
+                    ["Criminal Record", certData.hasCriminalRecord ? "Yes" : "None found"],
+                  ].map(([k, v]) => (
+                    <div key={k}>
+                      <dt className="text-xs text-slate-400 dark:text-slate-500">{k}</dt>
+                      <dd className="font-medium text-slate-700 dark:text-slate-300">{v || "—"}</dd>
+                    </div>
+                  ))}
+                </dl>
+                {Array.isArray(certData.addressDetails) && certData.addressDetails.map((a, i) => (
+                  <div key={i} className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                    Address: {a.Address || a.address} {(a.From || a.To) && `(${a.From || "?"} – ${a.To || "?"})`}
+                  </div>
+                ))}
+              </div>
             )}
 
             {liveStatus && (
