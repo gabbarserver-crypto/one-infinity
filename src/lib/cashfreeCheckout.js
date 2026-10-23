@@ -11,6 +11,8 @@
 // Used by QrPaymentPanel.jsx and DealerPortal.jsx's TopUpModal whenever
 // qrImageUrl comes back null from create-qr.js.
 
+import { Capacitor } from "@capacitor/core";
+
 const SDK_URL = "https://sdk.cashfree.com/js/v3/cashfree.js";
 
 let sdkPromise = null;
@@ -33,8 +35,19 @@ function loadScript() {
 // caller's own tab keeps running (e.g. its Realtime "waiting for payment"
 // subscription on payment_qr_requests keeps listening -- webhook.js fires
 // the same way regardless of which page the dealer actually paid from).
-export async function openCashfreeHostedCheckout({ paymentSessionId, mode = "sandbox" }) {
+export async function openCashfreeHostedCheckout({ paymentSessionId, mode = "sandbox", redirectTarget = "_blank" }) {
   const CashfreeCtor = await loadScript();
   const cashfree = CashfreeCtor({ mode });
-  return cashfree.checkout({ paymentSessionId, redirectTarget: "_blank" });
+  return cashfree.checkout({ paymentSessionId, redirectTarget });
+}
+
+// A shareable link that opens Cashfree's hosted checkout for this order from
+// any phone/browser, no login needed (handled by pages/PayLink.jsx, picked up
+// by App.jsx from the ?pay= query on the site root). Used when Cashfree
+// doesn't give us a QR image/UPI link for this account. Inside the Android
+// app window.location.origin is not a real website, so use the live domain.
+export function buildPayLink({ paymentSessionId, mode = "sandbox" }) {
+  if (!paymentSessionId) return "";
+  const origin = Capacitor.isNativePlatform() ? "https://www.1infinity.online" : window.location.origin;
+  return `${origin}/?pay=${encodeURIComponent(paymentSessionId)}&m=${mode === "production" ? "production" : "sandbox"}`;
 }

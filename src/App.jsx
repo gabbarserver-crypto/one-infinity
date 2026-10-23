@@ -34,6 +34,7 @@ import { subscribeThreadRead } from "./lib/threadReadBus";
 import PinUnlock from "./pages/PinUnlock";
 import SetupPinPrompt from "./components/SetupPinPrompt";
 import { hasPinSetUp, hasBeenPromptedForPin } from "./lib/pinLock";
+import PayLink from "./pages/PayLink";
 import PrivacyPolicy from "./pages/legal/PrivacyPolicy";
 import TermsAndConditions from "./pages/legal/TermsAndConditions";
 import RefundPolicy from "./pages/legal/RefundPolicy";
@@ -552,6 +553,11 @@ export default function App() {
     else unregisterForPush();
   }, [myIdentity?.type, myIdentity?.id]);
 
+
+  // Public shared payment link (?pay=<session>) — no login needed.
+  if (new URLSearchParams(window.location.search).get("pay")) {
+    return <PayLink />;
+  }
 
   const LegalPage = LEGAL_ROUTES[window.location.pathname.replace(/\/$/, "")];
   if (LegalPage) {

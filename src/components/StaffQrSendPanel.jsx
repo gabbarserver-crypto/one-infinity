@@ -16,6 +16,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { createPaymentQr, sendPush } from "../lib/serverApi";
 import { getOrCreateThread, sendMessage, identityFor } from "../lib/chat";
+import { buildPayLink } from "../lib/cashfreeCheckout";
 import { Modal, Field, Input, Select, PrimaryButton, GhostButton, Toast } from "./UI";
 
 // Cashfree requires order_expiry_time to be more than 15 minutes out, so
@@ -125,21 +126,27 @@ export default function StaffQrSendPanel({ staff, dealers, onClose }) {
     }
   };
 
-  // If Cashfree didn't send a QR image but did send the raw UPI link, draw
-  // the QR here so staff still has something to show/copy/share.
+  // Shareable link that opens Cashfree's hosted checkout for this order.
+  const payLink = qr ? buildPayLink({ paymentSessionId: qr.paymentSessionId, mode: qr.cashfreeMode }) : "";
+
+  // If Cashfree didn't send a QR image, draw one here — from its raw UPI
+  // link if it gave us one, otherwise from the shareable pay link above —
+  // so staff always has a QR to show/copy/share.
   useEffect(() => {
     setLocalQr("");
-    if (!qr || qr.qrImageUrl || !qr.qrRawString) return;
+    if (!qr || qr.qrImageUrl) return;
+    const source = qr.qrRawString || payLink;
+    if (!source) return;
     let cancelled = false;
     (async () => {
       try {
         const QRCode = (await import("qrcode")).default;
-        const url = await QRCode.toDataURL(qr.qrRawString, { margin: 1, width: 480 });
+        const url = await QRCode.toDataURL(source, { margin: 1, width: 480 });
         if (!cancelled) setLocalQr(url);
-      } catch { /* leave empty; the panel explains what's available */ }
+      } catch { /* leave empty */ }
     })();
     return () => { cancelled = true; };
-  }, [qr]);
+  }, [qr, payLink]);
 
   // Live countdown, purely for staff's own view of how long the dealer has
   // left -- Cashfree enforces the real expiry (order_expiry_time), not this.
@@ -186,7 +193,10 @@ export default function StaffQrSendPanel({ staff, dealers, onClose }) {
 
   const shownQr = qr?.qrImageUrl || localQr;
   const dealerMobile = dealers.find((d) => d.id === dealerId)?.mobile;
-  const shareText = `Payment QR — ₹${Number(amount).toLocaleString("en-IN")}\nScan with any UPI app (PhonePe, GPay, Paytm, BHIM). Valid for ${minutesValid} minutes.`;
+  const linkBased = !qr?.qrImageUrl && !qr?.qrRawString && !!payLink; // QR encodes our pay link, not a UPI string
+  const shareText = linkBased
+    ? `Payment — ₹${Number(amount).toLocaleString("en-IN")}\nOpen this link to pay (UPI / card / netbanking). Valid for ${minutesValid} minutes:\n${payLink}`
+    : `Payment QR — ₹${Number(amount).toLocaleString("en-IN")}\nScan with any UPI app (PhonePe, GPay, Paytm, BHIM). Valid for ${minutesValid} minutes.`;
 
   const copyImage = async () => {
     try {
@@ -269,30 +279,29 @@ export default function StaffQrSendPanel({ staff, dealers, onClose }) {
           </p>
           {shownQr ? (
             <>
-              <img src={shownQr} alt="UPI payment QR" className="mx-auto w-48 h-48 rounded-lg border border-slate-200 dark:border-slate-700 bg-white p-1" />
+              <img src={shownQr} alt="Payment QR" className="mx-auto w-48 h-48 rounded-lg border border-slate-200 dark:border-slate-700 bg-white p-1" />
+              {linkBased && (
+                <p className="text-xs text-slate-400 dark:text-slate-500">
+                  Scan this with the phone camera, or just send the link — it opens the secure payment page (UPI / card / netbanking).
+                </p>
+              )}
               <div className="flex gap-2">
                 <GhostButton onClick={copyImage} className="flex-1">📋 Copy QR</GhostButton>
                 <PrimaryButton onClick={shareWhatsApp} className="flex-1">WhatsApp</PrimaryButton>
               </div>
-              {qr.qrRawString && (
+              {linkBased && (
+                <button type="button" onClick={() => copyLink(payLink)} className="text-xs text-blue-500 hover:underline">Copy payment link</button>
+              )}
+              {!linkBased && qr.qrRawString && (
                 <button type="button" onClick={() => copyLink(qr.qrRawString)} className="text-xs text-blue-500 hover:underline">Copy UPI payment link</button>
               )}
             </>
+          ) : payLink ? (
+            <p className="text-xs text-slate-400 dark:text-slate-500">Preparing QR…</p>
           ) : (
-            <div className="space-y-2">
-              <p className="text-xs text-slate-400 dark:text-slate-500">
-                Cashfree didn't send a QR image for this account, so there's no QR to copy here — {dealerName} got a "Pay Now" button in chat instead, opening Cashfree's own checkout page.
-              </p>
-              {qr.paymentLink && (
-                <div className="flex gap-2">
-                  <GhostButton onClick={() => copyLink(qr.paymentLink)} className="flex-1">🔗 Copy pay link</GhostButton>
-                  <PrimaryButton
-                    onClick={() => window.open(`https://wa.me/${waNumber(dealerMobile)}?text=${encodeURIComponent(shareText + "\n" + qr.paymentLink)}`, "_blank", "noopener")}
-                    className="flex-1"
-                  >WhatsApp</PrimaryButton>
-                </div>
-              )}
-            </div>
+            <p className="text-xs text-slate-400 dark:text-slate-500">
+              No QR could be generated for this order — {dealerName} still got a "Pay Now" button in chat.
+            </p>
           )}
           <p className="text-xl font-bold text-slate-700 dark:text-slate-200">₹{Number(amount).toLocaleString("en-IN")}</p>
           <p className={`text-sm font-mono ${secondsLeft <= 30 ? "text-rose-500" : "text-slate-400"}`}>
