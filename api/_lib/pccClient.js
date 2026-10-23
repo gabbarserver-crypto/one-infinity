@@ -60,27 +60,54 @@ export async function lookupPccStatus({ applicationNumber, applicantName, guardi
 
   const id = String(application.applicationID);
 
-  const [detailsResult, statusResult] = await Promise.allSettled([
-    delhiClient.post("/get-pcc-applicant-details", { applicationID: id }),
-    delhiClient.post("/get-pcc-application-status", { applicationId: id }),
+  const [detailsResult, statusOutcome] = await Promise.all([
+    delhiClient.post("/get-pcc-applicant-details", { applicationID: id }).then(
+      (v) => ({ status: "fulfilled", value: v }),
+      (e) => ({ status: "rejected", reason: e })
+    ),
+    fetchApplicationStatus(id, application),
   ]);
 
   return {
     success: true,
     application,
     details: detailsResult.status === "fulfilled" ? detailsResult.value.data?.data || null : null,
-    status: statusResult.status === "fulfilled" ? statusResult.value.data?.data || null : null,
-    // When the portal answered OK but without a usable \"data\" object, hand its
+    status: statusOutcome.data,
+    statusError: statusOutcome.error,
+    // When the portal answered OK but without a usable "data" object, hand its
     // raw reply back so the UI can show what actually came back (instead of
     // silently showing no progress steps and no Download button).
-    statusRaw:
-      statusResult.status === "fulfilled" && !statusResult.value.data?.data
-        ? statusResult.value.data ?? null
-        : null,
-    statusError: statusResult.status === "rejected"
-      ? { message: statusResult.reason.message, body: statusResult.reason.response?.data || null }
-      : null,
+    statusRaw: statusOutcome.data ? null : statusOutcome.raw,
   };
+}
+
+// The portal's status endpoint has been picky about how the id is sent: it
+// used to want { applicationId: "<string>" } but has answered
+// "PCC Application not found." for that after it changed. So try the shapes
+// it could plausibly accept, one after another, and use the first that
+// returns real data. Stops at the first hit, so the normal case is still a
+// single request.
+async function fetchApplicationStatus(id, application) {
+  const numericId = Number(id);
+  const variants = [
+    { applicationId: id },
+    { applicationID: id },
+    ...(Number.isFinite(numericId) ? [{ applicationId: numericId }, { applicationID: numericId }] : []),
+    ...(application.applicationNumber ? [{ applicationNumber: application.applicationNumber }] : []),
+  ];
+
+  let raw = null;
+  let error = null;
+  for (const body of variants) {
+    try {
+      const r = await delhiClient.post("/get-pcc-application-status", body);
+      if (r.data?.data) return { data: r.data.data, raw: null, error: null };
+      raw = r.data ?? null; // OK reply but no data -> try the next shape
+    } catch (e) {
+      error = { message: e.message, body: e.response?.data || null };
+    }
+  }
+  return { data: null, raw, error: raw ? null : error };
 }
 
 // Delhi Police's timeline "stage" values (Pending, Assigned, Field Verified,

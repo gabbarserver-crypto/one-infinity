@@ -65,14 +65,9 @@ function stripKinPrefix(name) {
 // number (with the fixed DLSB-PCC/ prefix), applicant name, guardian name —
 // prefilled from our record, but editable, with an explicit "Search
 // Application" button. Nothing fires until the user clicks it.
-// Auto-sync (server cron, every 2 hours) already tries to fetch the
-// certificate itself, but that only works if it happens to reach the portal
-// without needing a logged-in session — see the caveat in
-// api/_lib/pccClient.js's downloadAndStoreCertificate(). Until/unless a
-// portal service-account login is wired in, the reliable path is: staff
-// clicks "Download Certificate" (opens in a new tab using their own browser
-// session, which does work), saves the PDF, then uploads it here so it's
-// stored in our own database/storage against this application going forward.
+// Auto-sync (server cron) fetches status and the certificate PDF by itself.
+// The manual path (Download Certificate, then Save Certificate to DB) stays
+// as a fallback for when the automatic download fails.
 async function saveCertificateFile(applicationId, file) {
   const path = `pcc-certificates/${applicationId}.pdf`;
   const { error: uploadError } = await supabase.storage
@@ -289,18 +284,9 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved }
             </div>
             {status?.certificateUrl && (
               <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">
-                "Download Certificate" requires an active, logged-in session on the Delhi Police
-                portal in this browser. If it shows a 401 error,{" "}
-                <button
-                  type="button"
-                  onClick={() => window.open("https://pcccvr.delhipolice.gov.in/login", "_blank", "noopener,noreferrer")}
-                  className="text-blue-600 font-semibold hover:underline"
-                >
-                  log into the portal
-                </button>{" "}
-                first, then try again. Once you have the PDF, use "Save Certificate to DB" to store
-                it against this application — auto-sync also tries to fetch it automatically every
-                couple of hours, but this manual step is the reliable path today.
+                "Download Certificate" opens the PDF straight from the Delhi Police portal (no
+                portal login needed). Auto-sync also saves the certificate to our records by
+                itself; if it hasn't yet, download the PDF here and use "Save Certificate to DB".
               </p>
             )}
 
