@@ -41,6 +41,7 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 // importing from Ledger.jsx anymore.)
 import { Capacitor } from "@capacitor/core";
 import { Browser } from "@capacitor/browser";
+import { fmtDate } from "../lib/dates";
 
 // Same file the Dashboard's "Download App" card points to (see
 // src/pages/Dashboard.jsx) — one APK, linked from every portal.
@@ -1351,7 +1352,7 @@ function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, 
                       {r.application_no || r.draft_code}
                     </button>
                   </td>
-                  <td className="px-3 py-2 text-slate-500 dark:text-slate-500">{r.submitted_at ? new Date(r.submitted_at).toLocaleDateString("en-IN") : "—"}</td>
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-500">{r.submitted_at ? fmtDate(r.submitted_at) : "—"}</td>
                   <td className="px-3 py-2 text-slate-700 dark:text-slate-300">
                     {r.services?.short_name || r.services?.parent_service || "—"}
                   </td>
@@ -1678,7 +1679,7 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
               {visibleRows.map((r) => (
                 <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
                   <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">
-                    {r.submitted_at ? new Date(r.submitted_at).toLocaleDateString("en-IN") : "—"}
+                    {r.submitted_at ? fmtDate(r.submitted_at) : "—"}
                   </td>
                   <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">{r.applicant_name || "—"}</td>
                   <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">
@@ -2407,7 +2408,7 @@ function DealerServiceAmounts({ dealerId, fromYear = new Date().getFullYear() })
               {filteredRows.map((r) => (
                 <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
                   <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">
-                    {r.submitted_at ? new Date(r.submitted_at).toLocaleDateString("en-IN") : "—"}
+                    {r.submitted_at ? fmtDate(r.submitted_at) : "—"}
                   </td>
                   <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{r.draft_code}</td>
                   <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">{r.applicant_name}</td>
@@ -2520,7 +2521,7 @@ function DealerPaymentHistory({ dealerId, refreshKey = 0, fromYear = new Date().
             <tbody>
               {filteredRows.map((r) => (
                 <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
-                  <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{new Date(r.entry_date).toLocaleDateString("en-IN")}</td>
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{fmtDate(r.entry_date)}</td>
                   <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{r.entry_code}</td>
                   <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">
                     {r.payment_mode || "—"}{r.reference_no ? ` · ${r.reference_no}` : ""}
@@ -2782,7 +2783,7 @@ function DealerLedger({ dealerId, refreshKey = 0, fromYear = new Date().getFullY
                   )}
                   {sortGroupTxns(group.txns).map((t) => (
                     <tr key={t.id} className="border-t border-slate-100 dark:border-slate-800">
-                      <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{t.created_at ? new Date(t.created_at).toLocaleDateString("en-IN") : "—"}</td>
+                      <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{t.created_at ? fmtDate(t.created_at) : "—"}</td>
                       <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{t.serviceCell}</td>
                       <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{t.applicantCell}</td>
                       <td className={`px-3 py-2 text-right font-semibold whitespace-nowrap ${t.type === "credit" ? "text-emerald-600" : "text-rose-600"}`}>

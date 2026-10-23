@@ -47,3 +47,17 @@ export function istNextDayStart(dateStr) {
   const next = new Date(Date.UTC(y, m - 1, d + 1));
   return `${next.toISOString().slice(0, 10)}T00:00:00${IST_OFFSET}`;
 }
+
+// Display format used everywhere in the UI and CSV exports: DD-MM-YYYY.
+// - "YYYY-MM-DD" strings (date columns) are just rearranged, no timezone maths.
+// - Timestamps are shown as the IST calendar day, whatever the device's timezone.
+// Returns "" for empty / invalid input.
+export function fmtDate(v) {
+  if (!v) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v));
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return "";
+  const iso = todayIST(d);
+  return `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`;
+}

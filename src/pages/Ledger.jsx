@@ -3,7 +3,7 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from "react"
 import { supabase } from "../lib/supabase";
 import { Card, Field, GhostButton, PrimaryButton, Modal } from "../components/UI";
 import { DealerForm, AgencyForm } from "./Masters";
-import { todayIST } from "../lib/dates";
+import { todayIST, fmtDate } from "../lib/dates";
 
 // Tailwind classes per ledger_type, purely cosmetic grouping — payments in
 // green, PCC in blue, anything else (service names like LL RIC, MCWG...)
@@ -24,7 +24,7 @@ function exportLedgerCSV(entityName, rows) {
   const lines = [header.join(",")];
   rows.forEach((r) => {
     lines.push([
-      escapeCsv(new Date(r.entry_date).toLocaleDateString()),
+      escapeCsv(fmtDate(r.entry_date)),
       escapeCsv(r.draft_code || ""),
       escapeCsv(r.entry_code),
       escapeCsv(r.ledger_type),
@@ -445,7 +445,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
               <tbody>
                 {periodRows.map((r) => (
                   <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
-                    <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{new Date(r.entry_date).toLocaleDateString()}</td>
+                    <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{fmtDate(r.entry_date)}</td>
                     <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{r.draft_code || "—"}</td>
                     <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{r.entry_code}</td>
                     <td className={`px-3 py-2 whitespace-nowrap ${txnTypeClass(r.ledger_type)}`}>{r.ledger_type || "—"}</td>
@@ -530,7 +530,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
                 </div>
               </div>
               {amountSaveError && <p className="text-rose-600 text-xs -mt-1">{amountSaveError}</p>}
-              <Row label="Submitted" value={appDetail.submitted_at ? new Date(appDetail.submitted_at).toLocaleDateString() : null} />
+              <Row label="Submitted" value={appDetail.submitted_at ? fmtDate(appDetail.submitted_at) : null} />
             </div>
           )}
         </Modal>
@@ -850,7 +850,7 @@ function BankTab() {
               filteredRows.map((r) => (
                 <tr key={r.entry_date} className={`border-t border-slate-100 dark:border-slate-800 ${r.entry_date === today ? "bg-blue-50 dark:bg-blue-500/10" : ""}`}>
                   <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">
-                    {new Date(r.entry_date).toLocaleDateString("en-IN")}{r.entry_date === today ? " (Today)" : ""}
+                    {fmtDate(r.entry_date)}{r.entry_date === today ? " (Today)" : ""}
                   </td>
                   <td className="px-3 py-2 text-right text-rose-600 font-medium whitespace-nowrap">
                     {r.fee_paid > 0 ? `₹${Number(r.fee_paid).toLocaleString("en-IN")}` : "—"}

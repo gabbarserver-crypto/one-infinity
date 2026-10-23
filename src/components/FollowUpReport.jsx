@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Card, StatusBadge } from "./UI";
 import { fetchFollowUpReport } from "../lib/nextService";
+import { fmtDate } from "../lib/dates";
 
 // Every Accepted application whose service has a configured "Next Service"
 // (Masters > Service > Next Service), 30+ days on from acceptance — the
@@ -81,7 +82,7 @@ export default function FollowUpReport({ dealerId, showDealerColumn = false }) {
                     <td className="px-3 py-2 text-slate-600 dark:text-slate-400">{r.dealers?.short_name || r.dealers?.name}</td>
                   )}
                   <td className="px-3 py-2 text-slate-600 dark:text-slate-400">{r.services?.short_name || r.services?.parent_service}</td>
-                  <td className="px-3 py-2 text-slate-500 dark:text-slate-500">{new Date(r.completed_at).toLocaleDateString("en-IN")}</td>
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-500">{fmtDate(r.completed_at)}</td>
                   <td className="px-3 py-2 text-slate-500 dark:text-slate-500">{r.daysSince}</td>
                   <td className="px-3 py-2">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${r.done ? "bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/30" : "bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-400 dark:border-amber-500/30"}`}>

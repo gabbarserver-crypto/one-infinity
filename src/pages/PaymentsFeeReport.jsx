@@ -9,6 +9,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { Card, Input } from "../components/UI";
+import { fmtDate } from "../lib/dates";
 
 const money = (v) => `₹${Number(v || 0).toLocaleString("en-IN")}`;
 
@@ -84,7 +85,7 @@ export default function PaymentsFeeReport() {
               ) : (
                 filtered.map((r) => (
                   <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                    <td className="px-3 py-2 text-slate-500 dark:text-slate-400 whitespace-nowrap">{r.submitted_at ? new Date(r.submitted_at).toLocaleDateString("en-IN") : "—"}</td>
+                    <td className="px-3 py-2 text-slate-500 dark:text-slate-400 whitespace-nowrap">{r.submitted_at ? fmtDate(r.submitted_at) : "—"}</td>
                     <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-300">{r.applicant_name || "—"}</td>
                     <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{r.application_no || r.draft_code || "—"}</td>
                     <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{r.dealers?.short_name || r.dealers?.name || "—"}</td>

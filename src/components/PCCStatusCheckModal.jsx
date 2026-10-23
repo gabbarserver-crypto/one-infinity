@@ -171,10 +171,14 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved }
   // Before the user clicks "Search Application", show whatever the last
   // auto-sync run stored on the row (pcc_timeline / pcc_last_synced_at)
   // instead of a blank stepper — it's already what the admin table shows.
-  const status = result?.status || (row.pcc_timeline?.length ? { timeline: row.pcc_timeline } : null);
+  const liveStatus = result?.status || null;
+  const status = liveStatus || (row.pcc_timeline?.length ? { timeline: row.pcc_timeline } : null);
   const steps = mapToSteps(status);
   const lastStep = steps[steps.length - 1];
-  const usingStoredTimeline = !result && row.pcc_timeline?.length > 0;
+  // Show the stored (auto-sync) progress whenever the live search didn't
+  // return one -- either before searching, or when the portal's status call
+  // came back empty.
+  const usingStoredTimeline = !liveStatus && row.pcc_timeline?.length > 0;
 
   return (
     <Modal title="Track Application" onClose={onClose} wide>
@@ -300,7 +304,7 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved }
               </p>
             )}
 
-            {status && (
+            {liveStatus && (
               <>
                 <h4 className="font-semibold text-slate-700 dark:text-slate-300 mt-5 mb-3">Application Progress</h4>
                 <ul>
@@ -322,10 +326,18 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved }
               </>
             )}
 
-            {!status && result?.statusError && (
-              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-4">
-                Found the application, but couldn't load its progress right now. Try Search Application again.
-              </p>
+            {!liveStatus && result && (
+              <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-4">
+                Found the application, but the portal didn't send its progress this time
+                {row.pcc_timeline?.length ? " (showing the last saved progress below)" : ""}. Try Search Application again.
+                {(result.statusError || result.statusRaw) && (
+                  <div className="mt-1 break-all text-[11px] text-amber-700/80">
+                    {result.statusError
+                      ? `Portal error: ${result.statusError.message}`
+                      : `Portal reply: ${JSON.stringify(result.statusRaw).slice(0, 300)}`}
+                  </div>
+                )}
+              </div>
             )}
 
             {lastStep.done && !status?.certificateUrl && (

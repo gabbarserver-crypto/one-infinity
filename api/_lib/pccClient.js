@@ -70,6 +70,13 @@ export async function lookupPccStatus({ applicationNumber, applicantName, guardi
     application,
     details: detailsResult.status === "fulfilled" ? detailsResult.value.data?.data || null : null,
     status: statusResult.status === "fulfilled" ? statusResult.value.data?.data || null : null,
+    // When the portal answered OK but without a usable \"data\" object, hand its
+    // raw reply back so the UI can show what actually came back (instead of
+    // silently showing no progress steps and no Download button).
+    statusRaw:
+      statusResult.status === "fulfilled" && !statusResult.value.data?.data
+        ? statusResult.value.data ?? null
+        : null,
     statusError: statusResult.status === "rejected"
       ? { message: statusResult.reason.message, body: statusResult.reason.response?.data || null }
       : null,

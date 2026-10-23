@@ -5,6 +5,7 @@ import { Card, Field, Input, Select, PrimaryButton, GhostButton, DangerButton, M
 import SearchableSelect from "../components/SearchableSelect";
 import StaffQrSendPanel from "../components/StaffQrSendPanel";
 import { parseCSV, findByLabel, ddmmyyyyToISO } from "../lib/csv";
+import { fmtDate } from "../lib/dates";
 
 function isoToDDMMYYYY(iso) {
   const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -686,7 +687,7 @@ function AllPaymentsTable({ payments, loading, query, setQuery, dateFrom, setDat
     const lines = [header.join(",")];
     filtered.forEach((p) => {
       lines.push([
-        escapeCsv(new Date(p.created_at).toLocaleDateString()),
+        escapeCsv(fmtDate(p.created_at)),
         escapeCsv(p.dealers?.name || p.paid_at_agency?.name || ""),
         escapeCsv(p.dealer_id ? "Dealer" : "Agency"),
         escapeCsv(p.applications?.draft_code || ""),
@@ -767,7 +768,7 @@ function AllPaymentsTable({ payments, loading, query, setQuery, dateFrom, setDat
                         <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleOne(p.id)} />
                       </td>
                     )}
-                    <td className="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-500">{new Date(p.created_at).toLocaleDateString()}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-500">{fmtDate(p.created_at)}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-300">{payerName(p)}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-500">{p.payment_mode}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-500">{p.receipt_no || p.reference_no || "—"}</td>
@@ -852,7 +853,7 @@ function BankTransactionsTable({ transactions, loading, query, setQuery, dateFro
               <tbody>
                 {filtered.map((t) => (
                   <tr key={t.id} className="border-t border-slate-100 dark:border-slate-800">
-                    <td className="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-500">{new Date(t.date).toLocaleDateString()}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-500">{fmtDate(t.date)}</td>
                     <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{t.label}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-500">{t.mode}</td>
                     <td className={`px-3 py-2 whitespace-nowrap text-right font-semibold ${t.type === "credit" ? "text-emerald-600" : "text-rose-500"}`}>
