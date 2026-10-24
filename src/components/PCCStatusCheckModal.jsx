@@ -84,7 +84,28 @@ async function saveCertificateFile(applicationId, file) {
   return path;
 }
 
-export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved }) {
+// Saves what the portal just told us onto the application row, so the status
+// dropdown / stepper update right away instead of waiting for the cron sync.
+// Same mapping as api/_lib/pccClient.js (mapStageToDropdownStatus). Rejected /
+// Police Case are never overwritten, matching the server sync.
+async function persistPccStatus(row, status) {
+  const timeline = status?.timeline || [];
+  if (!timeline.length) return null;
+  const reached = new Set(timeline.map((t) => t.stage));
+  let currentStage = null;
+  for (const stage of PCC_STAGE_ORDER) if (reached.has(stage)) currentStage = stage;
+
+  const updates = { pcc_timeline: timeline, pcc_last_synced_at: new Date().toISOString() };
+  if (currentStage) updates.pcc_stage = currentStage;
+  if (row.pcc_status !== "Rejected" && row.pcc_status !== "Police Case") {
+    updates.pcc_status = reached.has("Certificate Issued") ? "Certificate Issued" : "Under Verification";
+  }
+  const { error } = await supabase.from("applications").update(updates).eq("id", row.id);
+  if (error) throw error;
+  return updates;
+}
+
+export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, onStatusSynced }) {
   const [applicationNumber, setApplicationNumber] = useState(
     normalizePccApplicationNumber(row.pcc_no)?.replace(/^DLSB-PCC\//i, "") || ""
   );
@@ -146,6 +167,10 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved }
         throw new Error(data.error || "Application not found on the PCC portal");
       }
       setResult(data);
+      // Best effort: a failed save must not hide the status we just fetched.
+      persistPccStatus(row, data.status)
+        .then((updates) => { if (updates) onStatusSynced?.(row.id, updates); })
+        .catch((e) => console.warn("Could not save PCC status:", e.message));
       return data;
     } catch (err) {
       setError(err.message || "Failed to reach the PCC status server");

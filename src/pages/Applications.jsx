@@ -2767,6 +2767,9 @@ export default function Applications({ restricted = false, canEdit = true, canAp
         <PCCStatusCheckModal
           row={pccCheckRow}
           onClose={() => setPccCheckRow(null)}
+          onStatusSynced={(id, updates) =>
+            setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...updates } : r)))
+          }
           onCertificateSaved={(id) => {
             setRows((rs) =>
               rs.map((r) =>
