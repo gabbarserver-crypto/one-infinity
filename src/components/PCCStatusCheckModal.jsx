@@ -296,9 +296,9 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved }
             </div>
             {status?.certificateUrl && (
               <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">
-                "Download Certificate" opens the PDF straight from the Delhi Police portal (no
-                portal login needed). Auto-sync also saves the certificate to our records by
-                itself; if it hasn't yet, download the PDF here and use "Save Certificate to DB".
+                "Download Certificate" opens the PDF on the Delhi Police portal, which only works
+                while you are logged in to the portal in this browser (otherwise it shows HTTP 401).
+                Download the PDF there, then use "Save Certificate to DB" to keep it in our records.
               </p>
             )}
 
