@@ -292,7 +292,7 @@ export async function runPccAutoSync() {
   const { data: allRows, error: fetchError } = await fetchAllRows(() =>
     supabaseSync
       .from("applications")
-      .select("id, pcc_no, applicant_name, father_husband_name, pcc_status, pcc_stage, pcc_certificate_path, pcc_certificate_data")
+      .select("id, pcc_no, applicant_name, father_husband_name, pcc_status, pcc_stage, pcc_certificate_path, pcc_certificate_data, pcc_last_synced_at")
       .not("pcc_no", "is", null)
       .not("pcc_status", "in", '("Rejected","Police Case")')
       .order("id", { ascending: true })
@@ -305,9 +305,16 @@ export async function runPccAutoSync() {
 
   // Fully done = certificate issued AND we already have the PDF stored — no
   // point re-hitting the portal for those every 2 hours forever.
-  const rows = (allRows || []).filter(
-    (r) => !(r.pcc_stage === "Certificate Issued" && r.pcc_certificate_path && r.pcc_certificate_data)
-  );
+  // The serverless function has a hard time limit (60s on Vercel Hobby), and
+  // checking every application one by one can take longer. So each run works
+  // for a fixed time budget on the least-recently-synced rows first (never
+  // synced = first, in random order so rows the portal can't find don't block
+  // the queue) and the next run carries on where this one stopped.
+  const rows = (allRows || [])
+    .filter((r) => !(r.pcc_stage === "Certificate Issued" && r.pcc_certificate_path && r.pcc_certificate_data))
+    .map((r) => ({ r, k: r.pcc_last_synced_at ? Date.parse(r.pcc_last_synced_at) : -Math.random() }))
+    .sort((a, b) => a.k - b.k)
+    .map((x) => x.r);
 
   let updated = 0;
   let certificatesCaptured = 0;
@@ -321,7 +328,11 @@ export async function runPccAutoSync() {
     return { checked: 0, updated: 0, errors: [`portal session: ${e.message}`] };
   }
 
-  for (const row of rows) {
+  const deadline = Date.now() + 38000; // stop starting new rows after 38s
+  let cursor = 0;
+  let processed = 0;
+
+  const processRow = async (row) => {
     const applicationNumber = normalizePccApplicationNumber(row.pcc_no);
     const guardianName = stripKinPrefix(row.father_husband_name || "");
 
@@ -331,13 +342,13 @@ export async function runPccAutoSync() {
         session
       );
 
-      if (!result.success) continue; // not found on portal this round, leave as-is
+      if (!result.success) return; // not found on portal this round, leave as-is
 
       // Portal found the application but sent no status: leave the row alone,
       // including pcc_last_synced_at, so "Synced ..." only ever means real data.
       if (!result.status) {
         errors.push(`row ${row.id} (${row.pcc_no}): portal returned no status`);
-        continue;
+        return;
       }
 
       const { currentStage, timeline } = buildStageSnapshot(result.status);
@@ -385,13 +396,22 @@ export async function runPccAutoSync() {
     } catch (err) {
       errors.push(`row ${row.id} (${row.pcc_no}): ${err.message}`);
     }
+  };
 
-    // Small delay between requests so we don't hammer the portal.
-    await new Promise((r) => setTimeout(r, 300));
-  }
+  // A few rows at a time (not one by one) so more get done within the budget,
+  // while staying gentle on the portal.
+  const worker = async () => {
+    while (cursor < rows.length && Date.now() < deadline) {
+      const row = rows[cursor++];
+      await processRow(row);
+      processed += 1;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
 
   console.log(
-    `PCC auto-sync: checked ${rows.length}, updated ${updated}, certificates captured ${certificatesCaptured}, errors ${errors.length}`
+    `PCC auto-sync: checked ${processed} of ${rows.length}, updated ${updated}, certificates captured ${certificatesCaptured}, errors ${errors.length}`
   );
-  return { checked: rows.length, updated, certificatesCaptured, errors };
+  return { checked: processed, pending: rows.length - processed, updated, certificatesCaptured, errors };
 }
