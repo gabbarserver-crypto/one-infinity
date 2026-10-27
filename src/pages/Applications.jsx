@@ -1763,7 +1763,9 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     if (chatOnly && !chatStatus[r.id]) return false;
     if (pendingOnly && !isPendingData(r)) return false;
     if (bothPendingOnly && !isBothPending(r)) return false;
-    if (pccStatusOnly && r.pcc_status !== pccStatusOnly) return false;
+    // PCC status buttons only count rows whose RTO is "PCC" too — a CVR A etc.
+    // that has a real RTO chosen stays out even if it carries a PCC status.
+    if (pccStatusOnly && (r.pcc_status !== pccStatusOnly || !rtoIsPccMarker(r, rtoList))) return false;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       const haystack = [
@@ -1773,7 +1775,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
       if (!haystack.includes(q)) return false;
     }
     return true;
-  }), [rows, tab, chatOnly, chatStatus, pendingOnly, bothPendingOnly, pccStatusOnly, search]);
+  }), [rows, tab, chatOnly, chatStatus, pendingOnly, bothPendingOnly, pccStatusOnly, search, rtoList]);
 
   const filteredRows = useMemo(() => baseRows.filter((r) => {
     return Object.entries(columnFilters).every(([column, filter]) => {
@@ -2064,7 +2066,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
             ["Certificate Issued", "PCC Issued", "bg-green-600 text-white border-green-600"],
           ].map(([value, label, activeCls]) => {
             const active = pccStatusOnly === value;
-            const count = rows.filter((r) => r.pcc_status === value).length;
+            const count = rows.filter((r) => r.pcc_status === value && rtoIsPccMarker(r, rtoList)).length;
             return (
               <button
                 key={value}
