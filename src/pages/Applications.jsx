@@ -998,7 +998,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
   const updatePccFields = async (id, fields) => {
     const row = rows.find((r) => r.id === id);
     const payload = { ...fields };
-    if (fields.pcc_no && row && !row.pcc_fee) {
+    if (fields.pcc_no && row && (row.pcc_fee === null || row.pcc_fee === undefined || row.pcc_fee === "")) {
       payload.pcc_fee = 350;
     }
     const { error } = await supabase.from("applications").update(payload).eq("id", id);
@@ -1341,7 +1341,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
   const updatePccFee = async (row, rawValue) => {
     const feeValue = rawValue === "" ? null : parseFloat(rawValue);
     const fields = { pcc_fee: feeValue };
-    if (feeValue !== null && !row.slot_time) {
+    if (feeValue !== null && feeValue > 0 && !row.slot_time) {
       const today = new Date();
       const dd = String(today.getDate()).padStart(2, "0");
       const mm = String(today.getMonth() + 1).padStart(2, "0");
@@ -1691,9 +1691,12 @@ export default function Applications({ restricted = false, canEdit = true, canAp
   // every load — this only handles chatOnly and free-text search, which
   // still run over whatever the query already narrowed down.
   // Accepted, but still missing the data that would carry it to Completed.
+  // Services that don't take a LL/DL No. (e.g. plain "PCC") show "Not required"
+  // in that column, so a blank LL/DL No. is not pending for them.
+  const lldlNeeded = (r) => r.services?.ll_dl_no_required !== false;
   const isPendingData = (r) => {
     if (r.status !== "Accepted") return false;
-    if (!r.ll_dl_no) return true;
+    if (lldlNeeded(r) && !r.ll_dl_no) return true;
     if (pccNeeded(r) && !r.pcc_no) return true;
     return false;
   };
@@ -1705,7 +1708,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
   // this is the stricter AND, so it only surfaces the ones genuinely
   // waiting on a decision either way. A case already marked "Not Required"
   // no longer counts, since there's nothing left pending on the PCC side.
-  const isBothPending = (r) => r.status === "Accepted" && !r.ll_dl_no && pccNeeded(r) && !r.pcc_no;
+  const isBothPending = (r) => r.status === "Accepted" && lldlNeeded(r) && !r.ll_dl_no && pccNeeded(r) && !r.pcc_no;
 
   const [bothPendingOnly, setBothPendingOnly] = useState(false);
 
@@ -2183,7 +2186,10 @@ export default function Applications({ restricted = false, canEdit = true, canAp
 
       {!compactView && (
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl dark:bg-slate-900 dark:border-slate-800 overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* min-h: with only 1-2 result rows the scroll box shrank to a sliver and
+            clipped the column-filter dropdown (it is absolutely positioned
+            inside this overflow container), so keep room for it. */}
+        <div className="overflow-x-auto min-h-[26rem]">
         <table className="m-scroll w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-500">
             <tr>
@@ -2369,7 +2375,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                       width="w-20"
                       value={r.pcc_fee}
                       disabled={!pccNeeded(r)}
-                      readOnly={!!r.pcc_fee}
+                      readOnly={r.pcc_fee !== null && r.pcc_fee !== undefined && r.pcc_fee !== ""}
                       readOnlyTitle={FILLED_LOCK_TITLE}
                       onSave={(v) => updatePccFee(r, v)}
                     />
