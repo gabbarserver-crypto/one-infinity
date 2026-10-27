@@ -718,6 +718,11 @@ export default function Applications({ restricted = false, canEdit = true, canAp
   const [learningPopupRow, setLearningPopupRow] = useState(null);
 
   const [search, setSearch] = useState("");
+  // Any search looks through every year, not just the current one —
+  // otherwise an older application is never loaded and the search "finds
+  // nothing". This flips once (first character typed / box cleared), so it
+  // triggers a single reload rather than one per keystroke.
+  const searchAllYears = search.trim().length > 0;
   const [showFilters, setShowFilters] = useState(false);
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const [visibleCols, setVisibleCols] = useState(() =>
@@ -801,7 +806,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
         // is read by Postgres as UTC, which shifted the window by 5h30m.
         if (filterDateFrom) query = query.gte("submitted_at", istDayStart(filterDateFrom));
         if (filterDateTo) query = query.lt("submitted_at", istNextDayStart(filterDateTo));
-      } else if (!showAllYears) {
+      } else if (!showAllYears && !searchAllYears) {
         const currentYear = yearIST();
         const yFrom = `${currentYear}-01-01`;
         const yTo = `${currentYear}-12-31`;
@@ -935,7 +940,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     } catch {
       setChatStatus({});
     }
-  }, [tab, filterDealer, filterRto, filterAgency, filterService, filterDateFrom, filterDateTo, showAllYears]);
+  }, [tab, filterDealer, filterRto, filterAgency, filterService, filterDateFrom, filterDateTo, showAllYears, searchAllYears]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -1772,7 +1777,13 @@ export default function Applications({ restricted = false, canEdit = true, canAp
         r.draft_code, r.applicant_name, r.mobile, r.application_no, r.ll_dl_no, r.pcc_no,
         r.dealers?.name, r.dealers?.short_name, r.services?.parent_service, r.services?.short_name,
       ].filter(Boolean).join(" ").toLowerCase();
-      if (!haystack.includes(q)) return false;
+      // Pasted numbers often carry spaces or an extra leading 0 (e.g.
+      // 0202604023160 vs the stored 202604023160), so try those forms too.
+      const qDigits = q.replace(/\s+/g, "");
+      const numeric = /^\d+$/.test(qDigits);
+      const hit = haystack.includes(q) ||
+        (numeric && (haystack.includes(qDigits) || haystack.includes(qDigits.replace(/^0+/, ""))));
+      if (!hit) return false;
     }
     return true;
   }), [rows, tab, chatOnly, chatStatus, pendingOnly, bothPendingOnly, pccStatusOnly, search, rtoList]);
@@ -1990,7 +2001,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                 key={t}
                 onClick={() => setTab(t)}
                 className={`px-3 py-1.5 rounded-full text-xs font-semibold border flex items-center gap-1.5 ${
-                  tab === t ? "bg-slate-900 text-white border-slate-900" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700"
+                  tab === t ? "bg-slate-900 text-white border-slate-900 dark:bg-indigo-600 dark:border-indigo-300 dark:ring-2 dark:ring-indigo-400/40" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700"
                 }`}
               >
                 {STATUS_DISPLAY_LABELS[t] || t}

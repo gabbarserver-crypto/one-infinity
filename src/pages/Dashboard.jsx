@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { createGamesHandoffCode } from "../lib/serverApi";
 import { fetchAllRows } from "../lib/fetchAll";
+import { todayIST, istDayStart } from "../lib/dates";
 import { Capacitor } from "@capacitor/core";
 import { Browser } from "@capacitor/browser";
 import { FileText, CalendarCheck, CalendarClock, FileEdit, Clock, CheckCircle2, Users, UserCheck, Download, Smartphone, CreditCard, BarChart2, Settings as SettingsIcon, LayoutGrid, Wallet, Landmark, Gamepad2 } from "lucide-react";
@@ -22,6 +23,34 @@ import {
   Legend,
 } from "recharts";
 import { BOTTOM_TAB_KEYS } from "../components/BottomTabBar";
+
+// Dashboard charts are grouped by the APPLICATION DATE (applications.application_date),
+// not by submitted_at. submitted_at is just when the row was created, so a bulk
+// CSV import stamps every imported application with the import day and piles them
+// all into one month. Rows with no application_date yet (fresh drafts) fall back
+// to submitted_at, same rule the Applications page uses.
+const pad2 = (n) => String(n).padStart(2, "0");
+const firstOfMonthStr = (y, m0) => {
+  const d = new Date(Date.UTC(y, m0, 1)); // normalises month overflow/underflow
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-01`;
+};
+// Filter matching rows whose effective date is in [fromStr, toStr) (both "YYYY-MM-DD").
+const effectiveDateRangeOr = (fromStr, toStr) => {
+  const hi = toStr
+    ? `application_date.lt.${toStr}`
+    : null;
+  const hiTs = toStr ? `,submitted_at.lt.${istDayStart(toStr)}` : "";
+  return (
+    `and(application_date.gte.${fromStr}${hi ? "," + hi : ""}),` +
+    `and(application_date.is.null,submitted_at.gte.${istDayStart(fromStr)}${hiTs})`
+  );
+};
+// "YYYY-M0" bucket key (month 0-11) from a row's effective date.
+const effectiveMonthKey = (r) => {
+  const iso = r.application_date || (r.submitted_at ? todayIST(new Date(r.submitted_at)) : "");
+  if (!iso) return null;
+  return `${Number(iso.slice(0, 4))}-${Number(iso.slice(5, 7)) - 1}`;
+};
 
 // Icons for whichever nav items land in the mobile-only overflow row below
 // (see Dashboard()'s OVERFLOW_KEYS) — anything not already in the bottom
@@ -129,14 +158,14 @@ export default function Dashboard({ visibleNav = [], onNavigate, active }) {
     (async () => {
       setTrendLoading(true);
       // Rolling 6-month window ending this month (oldest -> newest).
-      const rangeStart = new Date(now0.getFullYear(), now0.getMonth() - 5, 1).toISOString();
+      const rangeStart = firstOfMonthStr(now0.getFullYear(), now0.getMonth() - 5);
       // Paged: six months of applications is well past Supabase's 1000-row
       // cap, which silently under-counted the trend.
       const { data, error } = await fetchAllRows(() =>
         supabase
           .from("applications")
-          .select("id, status, submitted_at, ll_dl_no, services(ll_dl_no_required)")
-          .gte("submitted_at", rangeStart)
+          .select("id, status, submitted_at, application_date, ll_dl_no, services(ll_dl_no_required)")
+          .or(effectiveDateRangeOr(rangeStart, null))
           .order("submitted_at", { ascending: false })
           .order("id", { ascending: false })
       );
@@ -148,19 +177,18 @@ export default function Dashboard({ visibleNav = [], onNavigate, active }) {
 
   // "This Month" breakdown — separate from the lifetime-total tiles above
   // (get_dashboard_counts() isn't month-scoped), so it's its own query
-  // against applications.submitted_at for whichever month/year is picked.
+  // against applications.application_date (submitted_at if unset) for whichever month/year is picked.
   useEffect(() => {
     (async () => {
       setMonthLoading(true);
       setMonthError("");
-      const rangeStart = new Date(year, month, 1).toISOString();
-      const rangeEnd = new Date(year, month + 1, 1).toISOString();
+      const rangeStart = firstOfMonthStr(year, month);
+      const rangeEnd = firstOfMonthStr(year, month + 1);
       const { data, error } = await fetchAllRows(() =>
         supabase
           .from("applications")
-          .select("id, status, submitted_at, ll_dl_no, dealers(name), services(ll_dl_no_required)")
-          .gte("submitted_at", rangeStart)
-          .lt("submitted_at", rangeEnd)
+          .select("id, status, submitted_at, application_date, ll_dl_no, dealers(name), services(ll_dl_no_required)")
+          .or(effectiveDateRangeOr(rangeStart, rangeEnd))
           .order("submitted_at", { ascending: false })
           .order("id", { ascending: false })
       );
@@ -227,7 +255,7 @@ export default function Dashboard({ visibleNav = [], onNavigate, active }) {
   // stacked, from the same dealerGroupRows the table below uses.
   const dealerBarData = dealerGroupRows.slice(0, 8);
 
-  // 6-month trend — bucket trendRows by submitted_at's month.
+  // 6-month trend — bucket trendRows by application date's month (submitted_at if unset).
   const trendBuckets = new Map();
   for (let i = 5; i >= 0; i--) {
     const d = new Date(now0.getFullYear(), now0.getMonth() - i, 1);
@@ -235,9 +263,8 @@ export default function Dashboard({ visibleNav = [], onNavigate, active }) {
     trendBuckets.set(key, { key, label: `${MONTH_SHORT[d.getMonth()]} '${String(d.getFullYear()).slice(2)}`, total: 0, pending: 0, completed: 0 });
   }
   for (const r of trendRows) {
-    const d = new Date(r.submitted_at);
-    const key = `${d.getFullYear()}-${d.getMonth()}`;
-    const bucket = trendBuckets.get(key);
+    const key = effectiveMonthKey(r);
+    const bucket = key ? trendBuckets.get(key) : null;
     if (!bucket) continue; // outside the 6-month window (shouldn't happen given the query range)
     bucket.total += 1;
     if (isCompleted(r)) bucket.completed += 1;
@@ -493,7 +520,7 @@ export default function Dashboard({ visibleNav = [], onNavigate, active }) {
       <div className="mt-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
         <div className="mb-4">
           <h3 className="font-semibold text-slate-800 dark:text-slate-100">Applications — Last 6 Months</h3>
-          <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Submitted, pending and completed, by month</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">By application date: total, pending and completed, per month</p>
         </div>
         {trendLoading ? (
           <div className="text-center py-8 text-slate-400 text-sm">Loading…</div>
