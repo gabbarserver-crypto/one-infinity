@@ -180,6 +180,12 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
       let av = a[sortKey], bv = b[sortKey];
       if (sortKey === "entry_date") { av = new Date(av); bv = new Date(bv); }
       if (sortKey === "debit" || sortKey === "credit" || sortKey === "running_balance") { av = Number(av || 0); bv = Number(bv || 0); }
+      if (sortKey === "draft_code") {
+        if (!av && !bv) return 0;
+        if (!av) return 1;
+        if (!bv) return -1;
+        return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: "base" }) * dir;
+      }
       if (av < bv) return -1 * dir;
       if (av > bv) return 1 * dir;
       return 0;
@@ -213,19 +219,22 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
   // query doesn't get that). So this goes through
   // get_draft_codes_for_ledger_rows(), a SECURITY DEFINER RPC that reads
   // both source_application_id and draft_code on our behalf in one call.
-  const attachDraftCodes = async (rowsIn) => {
+  const attachDraftCodes = async (rowsIn, ownerCol, ownerId) => {
     if (!rowsIn.length) return rowsIn;
     const rowIds = rowsIn.map((r) => r.id);
-    const { data: resolved, error } = await supabase.rpc("get_draft_codes_for_ledger_rows", { p_ledger_ids: rowIds });
-    if (error) {
-      console.error("get_draft_codes_for_ledger_rows failed", error);
-      return rowsIn;
-    }
+    const [{ data: resolved, error }, { data: payNos }] = await Promise.all([
+      supabase.rpc("get_draft_codes_for_ledger_rows", { p_ledger_ids: rowIds }),
+      // Payments keep their own draft no on the ledger row (staff can SELECT
+      // ledger_entries directly), so fetch those for this dealer/agency.
+      supabase.from("ledger_entries").select("id, payment_draft_no").eq(ownerCol, ownerId).eq("entry_type", "PAYMENT").not("payment_draft_no", "is", null).limit(5000),
+    ]);
+    if (error) console.error("get_draft_codes_for_ledger_rows failed", error);
     const byRowId = Object.fromEntries((resolved || []).map((r) => [r.ledger_id, r]));
+    const payNoById = Object.fromEntries((payNos || []).map((r) => [r.id, r.payment_draft_no]));
     return rowsIn.map((r) => ({
       ...r,
       source_application_id: r.source_application_id || byRowId[r.id]?.source_application_id || null,
-      draft_code: byRowId[r.id]?.draft_code || null,
+      draft_code: payNoById[r.id] || byRowId[r.id]?.draft_code || null,
     }));
   };
 
@@ -242,7 +251,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
           .eq("dealer_id", entityId)
           .order("entry_date", { ascending: false });
         setLoadError(rErr?.message || null);
-        setRowsState(await attachDraftCodes(r || []));
+        setRowsState(await attachDraftCodes(r || [], "dealer_id", entityId));
       } else {
         const { data: agencyRow } = await supabase.from("agencies").select("name").eq("id", entityId).maybeSingle();
         if (agencyRow?.name) setEntityName(agencyRow.name);
@@ -253,7 +262,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
           .eq("agency_id", entityId)
           .order("entry_date", { ascending: false });
         setLoadError(rErr?.message || null);
-        setRowsState(await attachDraftCodes(r || []));
+        setRowsState(await attachDraftCodes(r || [], "agency_id", entityId));
       }
     })();
   }, [entityId, entityMode]);
