@@ -156,7 +156,7 @@ const PCC_STATUS_STYLES = {
 // PCC No entered but no status picked yet — previously this got no colour
 // classes at all, so the number showed as dark text on a dark pill.
 const PCC_NO_STATUS_STYLE = "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-200 dark:border-blue-500/40";
-function PCCNoPopup({ pccNo, pccStatus, pccNotRequired, pccCertificatePath, onSave, onOpenPortal, onCheckStatus, onSetNotRequired, onUploadCertificate }) {
+function PCCNoPopup({ pccNo, pccStatus, pccRejectReason, pccNotRequired, pccCertificatePath, onSave, onOpenPortal, onCheckStatus, onSetNotRequired, onUploadCertificate }) {
   const [open, setOpen] = useState(false);
   const [localNo, setLocalNo] = useState(pccNo || "");
   const [localStatus, setLocalStatus] = useState(pccStatus || "");
@@ -292,9 +292,16 @@ function PCCNoPopup({ pccNo, pccStatus, pccNotRequired, pccCertificatePath, onSa
               </button>
             </div>
 
-            <div className="mb-3">
-              <DocUploadDropzone busy={uploading} onFile={handleUploadFile} />
-            </div>
+            {pccRejectReason ? (
+              <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 dark:bg-rose-950/20 dark:border-rose-900/40 px-3 py-2 text-xs text-rose-700 dark:text-rose-400">
+                <div className="font-semibold">PCC Rejected</div>
+                <div className="mt-0.5">{pccRejectReason}</div>
+              </div>
+            ) : (
+              <div className="mb-3">
+                <DocUploadDropzone busy={uploading} onFile={handleUploadFile} />
+              </div>
+            )}
 
             <table className="w-full text-xs mb-3 rounded-lg overflow-hidden border border-slate-100 dark:border-slate-800">
               <tbody>
@@ -348,13 +355,15 @@ function PCCNoPopup({ pccNo, pccStatus, pccNotRequired, pccCertificatePath, onSa
               update
             </PrimaryButton>
 
-            <button
-              type="button"
-              onClick={() => { onSetNotRequired(true); setOpen(false); }}
-              className="w-full text-left text-[11px] text-slate-500 hover:underline"
-            >
-              🚫 Mark PCC Not Required for this case
-            </button>
+            {!pccNo && (
+              <button
+                type="button"
+                onClick={() => { onSetNotRequired(true); setOpen(false); }}
+                className="w-full text-left text-[11px] text-slate-500 hover:underline"
+              >
+                🚫 Mark PCC Not Required for this case
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -421,6 +430,17 @@ function findPccRto(rtoList) {
 // longer expects a PCC No. to ever be filled in.
 function pccNeeded(row) {
   return !!row.services?.pcc_required && !row.pcc_not_required;
+}
+
+// Why the Delhi Police portal rejected this row's PCC (from the stored
+// timeline), or null when the PCC isn't Rejected. A Rejected row whose reason
+// isn't stored (e.g. marked Rejected by hand) gets a generic line.
+function pccRejectionReason(row) {
+  if (!row || row.pcc_status !== "Rejected") return null;
+  const entry = [...(row.pcc_timeline || [])].reverse().find((t) => t.stage === "Rejected");
+  const text = String(entry?.description || "").trim();
+  const reason = (text.match(/Reason:\s*(.*)$/is)?.[1] || text).trim();
+  return reason || "PCC application was rejected.";
 }
 function dealerLabel(d) {
   if (!d) return "";
@@ -2443,6 +2463,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                         <PCCNoPopup
                           pccNo={r.pcc_no}
                           pccStatus={r.pcc_status}
+                          pccRejectReason={pccRejectionReason(r)}
                           pccNotRequired={r.pcc_not_required}
                           pccCertificatePath={r.pcc_certificate_path}
                           onOpenPortal={() => openPccPortal(r)}
@@ -2765,7 +2786,6 @@ export default function Applications({ restricted = false, canEdit = true, canAp
         <PCCStatusCheckModal
           row={pccCheckRow}
           onClose={() => setPccCheckRow(null)}
-          onMarkNotRequired={(id) => updatePccFields(id, { pcc_not_required: true })}
           onStatusSynced={(id, updates) =>
             setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...updates } : r)))
           }
@@ -4613,7 +4633,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
                         ↗ Download Aadhaar (opens UIDAI)
                       </button>
                     )}
-                    {/pcc/i.test(d.name) && app.pcc_no && (
+                    {/pcc/i.test(d.name) && app.pcc_no && !pccRejectionReason(app) && (
                       <button
                         onClick={() => setPccCheckApp(app)}
                         className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline mb-1 block"
@@ -4621,7 +4641,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
                         ↗ Download PCC Certificate
                       </button>
                     )}
-                    <DocumentRow doc={d} applicationId={app.id} onChanged={onDocsChanged} />
+                    <DocumentRow doc={d} applicationId={app.id} onChanged={onDocsChanged} rejectedNote={/pcc/i.test(d.name) ? pccRejectionReason(app) : null} />
                   </div>
                 ))}
             </Card>
@@ -4883,7 +4903,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
                     ↗ Download Aadhaar (opens UIDAI)
                   </button>
                 )}
-                {/pcc/i.test(d.name) && app.pcc_no && (
+                {/pcc/i.test(d.name) && app.pcc_no && !pccRejectionReason(app) && (
                   <button
                     onClick={() => setPccCheckApp(app)}
                     className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline mb-1 block"
@@ -4891,7 +4911,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
                     ↗ Download PCC Certificate
                   </button>
                 )}
-                <DocumentRow doc={d} applicationId={app.id} onChanged={onDocsChanged} />
+                <DocumentRow doc={d} applicationId={app.id} onChanged={onDocsChanged} rejectedNote={/pcc/i.test(d.name) ? pccRejectionReason(app) : null} />
               </div>
             ))}
         </Card>
@@ -4934,7 +4954,7 @@ const DOC_STATUS_STYLES = {
   Rejected: "bg-rose-50 text-rose-700",
 };
 
-function DocumentRow({ doc, applicationId, onChanged }) {
+function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null }) {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -5054,17 +5074,17 @@ function DocumentRow({ doc, applicationId, onChanged }) {
               <div className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate" title={doc.name}>{doc.name}</div>
               {uploadedFileName ? (
                 <div className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5" title={uploadedFileName}>{uploadedFileName}</div>
-              ) : (
+              ) : rejectedNote ? null : (
                 <div className="text-[11px] text-rose-500 mt-0.5">No file uploaded yet</div>
               )}
             </div>
-            <span className={`px-2 py-1 rounded-full text-[10px] font-bold whitespace-nowrap ${statusClass}`}>{doc.status || "Pending"}</span>
+            <span className={`px-2 py-1 rounded-full text-[10px] font-bold whitespace-nowrap ${rejectedNote ? DOC_STATUS_STYLES.Rejected || statusClass : statusClass}`}>{rejectedNote ? "Rejected" : doc.status || "Pending"}</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-3">
             {doc.file_url ? (
               <a href={doc.file_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline">View full size ↗</a>
-            ) : (
+            ) : rejectedNote ? null : (
               <span className="text-xs font-semibold text-rose-500">Missing document</span>
             )}
             {doc.file_url && doc.status !== "Rejected" && doc.status !== "Verified" && (
@@ -5077,11 +5097,14 @@ function DocumentRow({ doc, applicationId, onChanged }) {
         </div>
       </div>
 
+      {rejectedNote && (
+        <div className="mx-3 mb-3 rounded-lg bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/40 px-3 py-2 text-xs text-rose-600 dark:text-rose-400">PCC Rejected — {rejectedNote}</div>
+      )}
       {doc.status === "Rejected" && doc.reject_reason && (
         <div className="mx-3 mb-3 rounded-lg bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/40 px-3 py-2 text-xs text-rose-600 dark:text-rose-400">Reason: {doc.reject_reason}</div>
       )}
 
-      {doc.status !== "Verified" && (
+      {doc.status !== "Verified" && !rejectedNote && (
         <div className="px-3 pb-3">
           <DocUploadDropzone busy={uploading} onFile={uploadFile} />
           {uploadError && <p className="text-rose-500 text-xs mt-1">{uploadError}</p>}

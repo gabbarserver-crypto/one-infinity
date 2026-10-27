@@ -148,7 +148,7 @@ async function persistGuardianName(row, guardianName) {
   return data?.length ? name : null;
 }
 
-export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, onStatusSynced, onMarkNotRequired }) {
+export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, onStatusSynced }) {
   const [applicationNumber, setApplicationNumber] = useState(
     normalizePccApplicationNumber(row.pcc_no)?.replace(/^DLSB-PCC\//i, "") || ""
   );
@@ -272,15 +272,6 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
       <div className="font-semibold">Application Rejected</div>
       {rejectedEntry?.date && <div className="text-xs mt-0.5">{rejectedEntry.date}</div>}
       <div className="mt-1">{rejectedEntry?.description || liveStatus?.statusDescription || "Your application has been rejected."}</div>
-      {onMarkNotRequired && !row.pcc_not_required && (
-        <button
-          type="button"
-          onClick={() => { onMarkNotRequired(row.id); onClose?.(); }}
-          className="mt-2 text-xs font-semibold text-rose-700 underline hover:no-underline"
-        >
-          🚫 Mark PCC Not Required for this case
-        </button>
-      )}
     </div>
   ) : null;
   // Show the stored (auto-sync) progress whenever the live search didn't
