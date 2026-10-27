@@ -285,20 +285,55 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
   // available limit as debt grows and grows it when they're prepaid.
   const availableLimit = Number(summary?.credit_limit || 0) + Number(runningBalance || 0);
 
+  // When the table is sorted by Draft No, the server's running_balance (built
+  // in date order) no longer matches what's on screen. Rebuild it by walking
+  // the rows in Draft No order (blank draft nos last, ties by date), starting
+  // from the same opening balance the server used. Derived from a row whose
+  // date is unique, since such a row's server balance doesn't depend on how
+  // same-day rows were ordered. Balance = opening + debit - credit, which is
+  // how the server view builds it.
+  const draftBalanceById = useMemo(() => {
+    if (sortKey !== "draft_code" || !rows.length) return null;
+    const dayOf = (r) => String(r.entry_date).slice(0, 10);
+    const perDay = {};
+    rows.forEach((r) => { perDay[dayOf(r)] = (perDay[dayOf(r)] || 0) + 1; });
+    const unique = rows.filter((r) => perDay[dayOf(r)] === 1).sort((a, b) => (dayOf(a) < dayOf(b) ? 1 : -1))[0];
+    if (!unique) return null; // can't derive the opening safely — keep the server's order
+    const prefix = rows.reduce((acc, r) => (dayOf(r) <= dayOf(unique) ? acc + Number(r.debit || 0) - Number(r.credit || 0) : acc), 0);
+    let bal = Number(unique.running_balance || 0) - prefix;
+    const asc = [...rows].sort((a, b) => {
+      if (!a.draft_code && !b.draft_code) { /* fall through to date */ }
+      else if (!a.draft_code) return 1;
+      else if (!b.draft_code) return -1;
+      else {
+        const c = String(a.draft_code).localeCompare(String(b.draft_code), undefined, { numeric: true, sensitivity: "base" });
+        if (c !== 0) return c;
+      }
+      const d = dayOf(a).localeCompare(dayOf(b));
+      return d !== 0 ? d : String(a.entry_code).localeCompare(String(b.entry_code));
+    });
+    const map = {};
+    asc.forEach((r) => { bal += Number(r.debit || 0) - Number(r.credit || 0); map[r.id] = Math.round(bal * 100) / 100; });
+    return map;
+  }, [rows, sortKey]);
+
   // Rows within the selected date range (inclusive).
   const periodRows = useMemo(() => {
-    if (!periodFrom && !periodTo) return sortedRows;
+    const withBal = draftBalanceById
+      ? sortedRows.map((r) => ({ ...r, running_balance: draftBalanceById[r.id] ?? r.running_balance }))
+      : sortedRows;
+    if (!periodFrom && !periodTo) return withBal;
     // entry_date and the period inputs are plain calendar dates, so compare
     // them as "YYYY-MM-DD" strings. Building Date objects from them mixed UTC
     // midnight (entry_date) with local midnight (the range), which is only
     // right by accident in IST.
-    return sortedRows.filter((r) => {
+    return withBal.filter((r) => {
       const day = String(r.entry_date).slice(0, 10);
       if (periodFrom && day < periodFrom) return false;
       if (periodTo && day > periodTo) return false;
       return true;
     });
-  }, [sortedRows, periodFrom, periodTo]);
+  }, [sortedRows, draftBalanceById, periodFrom, periodTo]);
 
   const periodTotals = useMemo(
     () =>
@@ -454,6 +489,9 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
             </Card>
           </div>
 
+          {draftBalanceById && (
+            <p className="no-print text-xs text-slate-400 dark:text-slate-500 mb-2">Running Balance Draft No order ke hisaab se dikh raha hai.</p>
+          )}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-x-auto">
             <table className="m-scroll w-full text-sm">
               <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-500">
