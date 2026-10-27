@@ -276,6 +276,22 @@ export async function downloadAndStoreCertificate({ applicationId, url, session 
   return path;
 }
 
+// The portal's rejection text looks like "Your application has been rejected.
+// Reason: <reason>". Returns the line to add to the application's remarks
+// (e.g. "PCC Rejected (14 Jun 2026): <reason>"), or null when the status isn't
+// Rejected or that reason is already in the remarks.
+function buildRejectionRemark(status, existingRemarks) {
+  if (status?.status !== "Rejected") return null;
+  const entry = [...(status.timeline || [])].reverse().find((t) => t.stage === "Rejected");
+  const text = String(entry?.description || status.statusDescription || "").trim();
+  const reason = (text.match(/Reason:\s*(.*)$/is)?.[1] || text).trim();
+  if (!reason) return null;
+  if (String(existingRemarks || "").toLowerCase().includes(reason.toLowerCase())) return null;
+  const when = String(entry?.date || "").replace(/,\s*\d{1,2}:\d{2}.*$/, "").trim();
+  const line = `PCC Rejected${when ? ` (${when})` : ""}: ${reason}`;
+  return existingRemarks ? `${existingRemarks}\n${line}` : line;
+}
+
 /**
  * Re-checks every application that has a PCC number and isn't already fully
  * done, and writes the current stage/timeline (and pcc_status, kept in sync
@@ -297,7 +313,7 @@ export async function runPccAutoSync() {
   const { data: allRows, error: fetchError } = await fetchAllRows(() =>
     supabaseSync
       .from("applications")
-      .select("id, pcc_no, applicant_name, father_husband_name, pcc_status, pcc_stage, pcc_certificate_path, pcc_certificate_data, pcc_last_synced_at")
+      .select("id, pcc_no, applicant_name, father_husband_name, pcc_status, pcc_stage, pcc_certificate_path, pcc_certificate_data, pcc_last_synced_at, remarks")
       .not("pcc_no", "is", null)
       .not("pcc_status", "in", '("Rejected","Police Case")')
       .order("id", { ascending: true })
@@ -363,6 +379,8 @@ export async function runPccAutoSync() {
       if (currentStage && currentStage !== row.pcc_stage) updates.pcc_stage = currentStage;
       if (timeline.length) updates.pcc_timeline = timeline;
       if (newDropdownStatus && newDropdownStatus !== row.pcc_status) updates.pcc_status = newDropdownStatus;
+      const rejectionRemark = buildRejectionRemark(result.status, row.remarks);
+      if (rejectionRemark) updates.remarks = rejectionRemark;
 
       if (currentStage === "Certificate Issued" && !row.pcc_certificate_path && result.status?.certificateUrl) {
         try {

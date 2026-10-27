@@ -86,6 +86,22 @@ async function saveCertificateFile(applicationId, file) {
   return path;
 }
 
+// The portal's rejection text looks like "Your application has been rejected.
+// Reason: <reason>". Returns the line to add to the application's remarks
+// (e.g. "PCC Rejected (14 Jun 2026): <reason>"), or null when the status isn't
+// Rejected or that reason is already in the remarks.
+function buildRejectionRemark(status, existingRemarks) {
+  if (status?.status !== "Rejected") return null;
+  const entry = [...(status.timeline || [])].reverse().find((t) => t.stage === "Rejected");
+  const text = String(entry?.description || status.statusDescription || "").trim();
+  const reason = (text.match(/Reason:\s*(.*)$/is)?.[1] || text).trim();
+  if (!reason) return null;
+  if (String(existingRemarks || "").toLowerCase().includes(reason.toLowerCase())) return null;
+  const when = String(entry?.date || "").replace(/,\s*\d{1,2}:\d{2}.*$/, "").trim();
+  const line = `PCC Rejected${when ? ` (${when})` : ""}: ${reason}`;
+  return existingRemarks ? `${existingRemarks}\n${line}` : line;
+}
+
 // Saves what the portal just told us onto the application row, so the status
 // dropdown / stepper update right away instead of waiting for the cron sync.
 // Same mapping as api/_lib/pccClient.js (mapStageToDropdownStatus). Rejected /
@@ -101,6 +117,11 @@ async function persistPccStatus(row, status) {
   if (currentStage) updates.pcc_stage = currentStage;
   if (status?.status === "Rejected") {
     updates.pcc_status = "Rejected";
+    // Also keep the rejection reason in the application's Remark. Re-read the
+    // current remarks first so a repeat search doesn't add it twice.
+    const { data: cur } = await supabase.from("applications").select("remarks").eq("id", row.id).maybeSingle();
+    const remark = buildRejectionRemark(status, cur?.remarks);
+    if (remark) updates.remarks = remark;
   } else if (row.pcc_status !== "Rejected" && row.pcc_status !== "Police Case") {
     updates.pcc_status = reached.has("Certificate Issued") ? "Certificate Issued" : "Under Verification";
   }
@@ -127,7 +148,7 @@ async function persistGuardianName(row, guardianName) {
   return data?.length ? name : null;
 }
 
-export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, onStatusSynced }) {
+export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, onStatusSynced, onMarkNotRequired }) {
   const [applicationNumber, setApplicationNumber] = useState(
     normalizePccApplicationNumber(row.pcc_no)?.replace(/^DLSB-PCC\//i, "") || ""
   );
@@ -251,6 +272,15 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
       <div className="font-semibold">Application Rejected</div>
       {rejectedEntry?.date && <div className="text-xs mt-0.5">{rejectedEntry.date}</div>}
       <div className="mt-1">{rejectedEntry?.description || liveStatus?.statusDescription || "Your application has been rejected."}</div>
+      {onMarkNotRequired && !row.pcc_not_required && (
+        <button
+          type="button"
+          onClick={() => { onMarkNotRequired(row.id); onClose?.(); }}
+          className="mt-2 text-xs font-semibold text-rose-700 underline hover:no-underline"
+        >
+          🚫 Mark PCC Not Required for this case
+        </button>
+      )}
     </div>
   ) : null;
   // Show the stored (auto-sync) progress whenever the live search didn't
@@ -350,8 +380,8 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
                     {downloading ? "Getting link…" : "⬇ Download Certificate"}
                   </button>
                 )}
-                <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleCertFileChosen} />
-                <button
+                {!isRejected && <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleCertFileChosen} />}
+                {!isRejected && <button
                   type="button"
                   disabled={savingCert}
                   onClick={() => fileInputRef.current?.click()}
@@ -363,7 +393,7 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
                   }`}
                 >
                   {savingCert ? "Saving…" : certSaved ? "✓ Saved to our records" : "📤 Save Certificate to DB"}
-                </button>
+                </button>}
               </div>
             </div>
             {status?.certificateUrl && (
