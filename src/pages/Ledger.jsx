@@ -142,6 +142,24 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
   // Admin-only: removes a single ledger entry outright — for correcting
   // mistakes like a duplicate row, without touching the application/payment
   // it came from.
+  // Admin-only: set/clear the Draft No on a PAYMENT row (links it to that
+  // application via the set_ledger_entry_draft_code RPC).
+  const [draftEditId, setDraftEditId] = useState(null);
+  const [draftEditValue, setDraftEditValue] = useState("");
+  const [draftSaving, setDraftSaving] = useState(false);
+  const saveDraftCode = useCallback(async (row) => {
+    setDraftSaving(true);
+    const { data, error } = await supabase.rpc("set_ledger_entry_draft_code", {
+      p_entry_id: row.id,
+      p_draft_code: draftEditValue,
+    });
+    setDraftSaving(false);
+    if (error) { alert(error.message); return; }
+    setRowsState((prev) => prev.map((r) => (r.id === row.id ? { ...r, draft_code: data || null } : r)));
+    setDraftEditId(null);
+    setDraftEditValue("");
+  }, [draftEditValue]);
+
   const [deletingRowId, setDeletingRowId] = useState(null);
   const deleteRow = useCallback(async (row) => {
     const amt = row.debit > 0 ? row.debit : row.credit;
@@ -446,7 +464,40 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
                 {periodRows.map((r) => (
                   <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
                     <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{fmtDate(r.entry_date)}</td>
-                    <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{r.draft_code || "—"}</td>
+                    <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">
+                      {isAdmin && r.entry_type === "PAYMENT" ? (
+                        draftEditId === r.id ? (
+                          <span className="inline-flex items-center gap-1">
+                            <input
+                              autoFocus
+                              value={draftEditValue}
+                              onChange={(e) => setDraftEditValue(e.target.value.toUpperCase())}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveDraftCode(r);
+                                if (e.key === "Escape") { setDraftEditId(null); setDraftEditValue(""); }
+                              }}
+                              placeholder="ANK020"
+                              className="w-24 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 px-1.5 py-0.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                            />
+                            <button type="button" onClick={() => saveDraftCode(r)} disabled={draftSaving} className="text-xs font-semibold text-emerald-600 disabled:opacity-50">
+                              {draftSaving ? "…" : "Save"}
+                            </button>
+                            <button type="button" onClick={() => { setDraftEditId(null); setDraftEditValue(""); }} className="text-xs text-slate-400">✕</button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => { setDraftEditId(r.id); setDraftEditValue(r.draft_code || ""); }}
+                            className="hover:underline decoration-dotted hover:text-blue-600"
+                            title="Edit draft no"
+                          >
+                            {r.draft_code || "— ✎"}
+                          </button>
+                        )
+                      ) : (
+                        r.draft_code || "—"
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{r.entry_code}</td>
                     <td className={`px-3 py-2 whitespace-nowrap ${txnTypeClass(r.ledger_type)}`}>{r.ledger_type || "—"}</td>
                     <td className="px-3 py-2 text-slate-700 dark:text-slate-300">
