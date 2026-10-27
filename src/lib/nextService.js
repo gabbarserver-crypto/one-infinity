@@ -40,7 +40,7 @@ export function buildAppointmentDraft(sourceApp, { serviceId, slotTime, draftCod
   if (pccNo) serviceAnswers["PCC No"] = pccNo;
 
   return {
-    draft_code: draftCode,
+    ...(draftCode ? { draft_code: draftCode } : {}),
     dealer_id: sourceApp.dealer_id,
     service_id: serviceId,
     applicant_name: sourceApp.applicant_name,

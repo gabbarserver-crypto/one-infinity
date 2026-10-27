@@ -715,16 +715,11 @@ function NewApplicationModal({ dealer, identity, onClose, onCreated }) {
     }
     setSaving(true);
     setError("");
-    const { data: draftCode, error: codeError } = await supabase.rpc("next_draft_code", { p_dealer_id: dealer.id });
-    if (codeError) {
-      setSaving(false);
-      setError("Failed: " + codeError.message);
-      return;
-    }
+    // No draft code yet: the database gives the application a temporary NEW-xxxxxx
+    // id and assigns the real sequential Draft No once staff fill in the Amount.
     const { data: newApp, error: insertError } = await supabase
       .from("applications")
       .insert({
-        draft_code: draftCode,
         dealer_id: dealer.id,
         service_id: f.service_id,
         applicant_name: f.applicant_name.trim(),
@@ -759,7 +754,7 @@ function NewApplicationModal({ dealer, identity, onClose, onCreated }) {
     if (reqDocsError) {
       setSaving(false);
       setError("Application created, but couldn't load its required documents: " + reqDocsError.message);
-      onCreated(draftCode, f.applicant_name.trim(), newApp.id, f.service_id);
+      onCreated(newApp.draft_code, f.applicant_name.trim(), newApp.id, f.service_id);
       return;
     }
     if (reqDocs?.length) {
@@ -770,13 +765,13 @@ function NewApplicationModal({ dealer, identity, onClose, onCreated }) {
       if (docsInsertError) {
         setSaving(false);
         setError("Application created, but couldn't set up its documents: " + docsInsertError.message);
-        onCreated(draftCode, f.applicant_name.trim(), newApp.id, f.service_id);
+        onCreated(newApp.draft_code, f.applicant_name.trim(), newApp.id, f.service_id);
         return;
       }
     }
 
     setSaving(false);
-    onCreated(draftCode, f.applicant_name.trim(), newApp.id, f.service_id);
+    onCreated(newApp.draft_code, f.applicant_name.trim(), newApp.id, f.service_id);
   };
 
   return (
@@ -1541,9 +1536,9 @@ function DealerAppointments({ dealerId, identity, refreshKey, fromYear = new Dat
       dealerId,
       applicationId: newApp.id,
       identity,
-      text: `New application submitted: ${payload.draft_code} — ${payload.applicant_name} (appointment booking). It's now showing under Draft Submitted.`,
+      text: `New application submitted: ${newApp.draft_code} — ${payload.applicant_name} (appointment booking). It's now showing under Draft Submitted.`,
     });
-    setToast(`Created ${payload.draft_code} from ${bookingApp.sourceApp.draft_code}`);
+    setToast(`Created ${newApp.draft_code} from ${bookingApp.sourceApp.draft_code}`);
     setBookingApp(null);
     load();
   };

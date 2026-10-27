@@ -1232,11 +1232,13 @@ export default function Applications({ restricted = false, canEdit = true, canAp
       payload.amount_entered_by = staff.id;
       payload.amount_entered_at = new Date().toISOString();
     }
-    const { error } = await supabase.from("applications").update(payload).eq("id", id);
+    const { data: updated, error } = await supabase.from("applications").update(payload).eq("id", id).select("draft_code").maybeSingle();
     if (error) {
       setToast("Failed to update amount: " + error.message);
       return;
     }
+    // The database assigns the real Draft No the first time an Amount is saved.
+    if (updated?.draft_code) payload.draft_code = updated.draft_code;
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...payload } : r)));
 
     const row = rows.find((r) => r.id === id);
@@ -1589,15 +1591,11 @@ export default function Applications({ restricted = false, canEdit = true, canAp
   };
 
   const createApplication = async (form) => {
-    const { data: draftCode, error: codeError } = await supabase.rpc("next_draft_code", { p_dealer_id: form.dealer_id });
-    if (codeError) {
-      setToast("Failed: " + codeError.message);
-      return;
-    }
+    // Draft No is assigned by the database once the Amount is filled in
+    // (until then the application carries a temporary NEW-xxxxxx id).
     const selectedService = serviceList.find((s) => s.id === form.service_id);
     const autoRtoId = isPccRelatedService(selectedService) ? findPccRto(rtoList)?.id || null : null;
     const { data: newApp, error } = await supabase.from("applications").insert({
-      draft_code: draftCode,
       dealer_id: form.dealer_id,
       service_id: form.service_id,
       applicant_name: form.applicant_name,
@@ -1622,7 +1620,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     // documents even if the service has some configured in Masters.
     await copyRequiredDocuments(newApp.id, form.service_id);
 
-    setToast(`Created ${draftCode}`);
+    setToast(`Created ${newApp.draft_code}`);
     setShowNew(false);
     load();
   };
@@ -1634,7 +1632,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     if (error) throw new Error(error.message);
     await copyRequiredDocuments(newApp.id, payload.service_id);
     await copyForwardDocuments(bookingApp.sourceApp.id, newApp.id);
-    setToast(`Created ${payload.draft_code} from ${bookingApp.sourceApp.draft_code}`);
+    setToast(`Created ${newApp.draft_code} from ${bookingApp.sourceApp.draft_code}`);
     setBookingApp(null);
     load();
   };
@@ -3148,14 +3146,9 @@ function ImportApplicationsModal({ dealerList, serviceList, rtoList, agencyList,
         if (r.payload.draft_code) {
           payloads.push(r.payload);
         } else {
-          const { data: generated, error: codeError } = await supabase.rpc("next_draft_code", { p_dealer_id: r.payload.dealer_id });
-          if (codeError) {
-            setError(`Import failed generating a draft code for "${r.payload.applicant_name}": ` + codeError.message);
-            setImporting(false);
-            setProgress(null);
-            return;
-          }
-          payloads.push({ ...r.payload, draft_code: generated });
+          // No code in the CSV: the database assigns the real Draft No only if an
+          // Amount is present, otherwise a temporary NEW-xxxxxx id until it is filled.
+          payloads.push(r.payload);
         }
         codeGenDone += 1;
         if (codeGenDone % 25 === 0 || codeGenDone === rowsToImport.length) {

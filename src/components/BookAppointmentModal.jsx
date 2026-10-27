@@ -15,12 +15,10 @@ export default function BookAppointmentModal({ sourceApp, nextService, onClose, 
     setSaving(true);
     setError("");
     try {
-      const { data: draftCode, error: codeError } = await supabase.rpc("next_draft_code", { p_dealer_id: sourceApp.dealer_id });
-      if (codeError) throw new Error(codeError.message);
+      // Draft No is assigned by the database once the Amount is filled in.
       const payload = buildAppointmentDraft(sourceApp, {
         serviceId: nextService.id,
         slotTime: date || null,
-        draftCode,
       });
       await onBooked(payload);
     } catch (e) {
