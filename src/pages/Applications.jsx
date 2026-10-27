@@ -4724,7 +4724,14 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
         </div>
       </Modal>
       {pccCheckApp && (
-        <PCCStatusCheckModal row={pccCheckApp} onClose={() => setPccCheckApp(null)} />
+        <PCCStatusCheckModal
+          row={pccCheckApp}
+          onClose={() => setPccCheckApp(null)}
+          onStatusSynced={(id, updates) => {
+            if (updates.father_husband_name)
+              setApplicant((s) => (s.father_husband_name ? s : { ...s, father_husband_name: updates.father_husband_name }));
+          }}
+        />
       )}
       {showPccLetter && (
         <PCCLetterModal app={app} onClose={() => setShowPccLetter(false)} />
@@ -4903,7 +4910,14 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
       </div>
     </Modal>
     {pccCheckApp && (
-      <PCCStatusCheckModal row={pccCheckApp} onClose={() => setPccCheckApp(null)} />
+      <PCCStatusCheckModal
+        row={pccCheckApp}
+        onClose={() => setPccCheckApp(null)}
+        onStatusSynced={(id, updates) => {
+          if (updates.father_husband_name)
+            setApplicant((s) => (s.father_husband_name ? s : { ...s, father_husband_name: updates.father_husband_name }));
+        }}
+      />
     )}
     {showPccLetter && (
       <PCCLetterModal app={app} onClose={() => setShowPccLetter(false)} />

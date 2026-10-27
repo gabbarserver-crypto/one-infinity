@@ -105,6 +105,24 @@ async function persistPccStatus(row, status) {
   return updates;
 }
 
+// If the record has no Father/Husband name, the user types it into the
+// Guardian Name box before searching. Once the portal confirms the
+// application with that name, store it on the record too. Never overwrites an
+// existing value.
+async function persistGuardianName(row, guardianName) {
+  const name = stripKinPrefix(guardianName)?.trim();
+  if (!name) return null;
+  if (stripKinPrefix(row.father_husband_name)?.trim()) return null;
+  const { data, error } = await supabase
+    .from("applications")
+    .update({ father_husband_name: name })
+    .eq("id", row.id)
+    .or("father_husband_name.is.null,father_husband_name.eq.")
+    .select("id");
+  if (error) throw error;
+  return data?.length ? name : null;
+}
+
 export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, onStatusSynced }) {
   const [applicationNumber, setApplicationNumber] = useState(
     normalizePccApplicationNumber(row.pcc_no)?.replace(/^DLSB-PCC\//i, "") || ""
@@ -167,6 +185,17 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
         throw new Error(data.error || "Application not found on the PCC portal");
       }
       setResult(data);
+      // Best effort: save the Guardian Name onto the record if it was blank.
+      if (data.application) {
+        persistGuardianName(row, guardianName)
+          .then((name) => {
+            if (name) {
+              row.father_husband_name = name; // avoid re-saving on next search
+              onStatusSynced?.(row.id, { father_husband_name: name });
+            }
+          })
+          .catch((e) => console.warn("Could not save guardian name:", e.message));
+      }
       // Best effort: a failed save must not hide the status we just fetched.
       persistPccStatus(row, data.status)
         .then((updates) => { if (updates) onStatusSynced?.(row.id, updates); })
