@@ -508,8 +508,12 @@ function ExcelFilterTh({ column, label, sortKey, sortDir, onSort, filterState, s
     setQuery("");
   };
 
+  // No filter, or a filter that lists every value, means "everything is ticked".
+  const allSelected = !hasValueFilter || options.every((o) => current.includes(o.key));
+  // Acts as a toggle: when everything is ticked it unticks everything, and
+  // when anything is unticked it ticks everything again.
   const selectAll = () => {
-    setFilterState((prev) => ({ ...prev, [column]: options.map((o) => o.key) }));
+    setFilterState((prev) => ({ ...prev, [column]: allSelected ? [] : options.map((o) => o.key) }));
   };
 
   const toggleValue = (key) => {
@@ -606,7 +610,7 @@ function ExcelFilterTh({ column, label, sortKey, sortDir, onSort, filterState, s
           />
 
           <div className="flex items-center justify-between px-1 mb-1">
-            <button type="button" onClick={selectAll} className="text-blue-600 hover:underline">Select All</button>
+            <button type="button" onClick={selectAll} className="text-blue-600 hover:underline">{allSelected ? "Unselect All" : "Select All"}</button>
             <span className="text-slate-400">{options.length} values</span>
           </div>
 
@@ -653,6 +657,9 @@ export default function Applications({ restricted = false, canEdit = true, canAp
   // Quick filter: Accepted applications still missing PCC No. or Learning
   // No. — the two fields that drive the auto-Completed flow.
   const [pendingOnly, setPendingOnly] = useState(false);
+  // "" | "Rejected" | "Under Verification" | "Certificate Issued" — quick PCC
+  // status filter chips (each shows how many applications are in that status).
+  const [pccStatusOnly, setPccStatusOnly] = useState("");
   // Defaults to current-year-only once the data set gets large (13k+ historical
   // rows made "show everything" the default choke point). "Show All" lets
   // anyone drop back to the full history on demand. The Draft inbox is the
@@ -1747,6 +1754,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     if (chatOnly && !chatStatus[r.id]) return false;
     if (pendingOnly && !isPendingData(r)) return false;
     if (bothPendingOnly && !isBothPending(r)) return false;
+    if (pccStatusOnly && r.pcc_status !== pccStatusOnly) return false;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       const haystack = [
@@ -1756,7 +1764,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
       if (!haystack.includes(q)) return false;
     }
     return true;
-  }), [rows, tab, chatOnly, chatStatus, pendingOnly, bothPendingOnly, search]);
+  }), [rows, tab, chatOnly, chatStatus, pendingOnly, bothPendingOnly, pccStatusOnly, search]);
 
   const filteredRows = useMemo(() => baseRows.filter((r) => {
     return Object.entries(columnFilters).every(([column, filter]) => {
@@ -1831,7 +1839,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
   useEffect(() => {
     setPage(1);
-  }, [tab, search, filterDealer, filterRto, filterAgency, filterService, filterDateFrom, filterDateTo, chatOnly, showAllYears, pendingOnly, bothPendingOnly, columnFilters]);
+  }, [tab, search, filterDealer, filterRto, filterAgency, filterService, filterDateFrom, filterDateTo, chatOnly, showAllYears, pendingOnly, bothPendingOnly, pccStatusOnly, columnFilters]);
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
@@ -2041,6 +2049,29 @@ export default function Applications({ restricted = false, canEdit = true, canAp
               )}
             </button>
           )}
+          {[
+            ["Rejected", "PCC Rejected", "bg-red-600 text-white border-red-600"],
+            ["Under Verification", "PCC Under Verification", "bg-yellow-500 text-white border-yellow-500"],
+            ["Certificate Issued", "PCC Issued", "bg-green-600 text-white border-green-600"],
+          ].map(([value, label, activeCls]) => {
+            const active = pccStatusOnly === value;
+            const count = rows.filter((r) => r.pcc_status === value).length;
+            return (
+              <button
+                key={value}
+                onClick={() => setPccStatusOnly(active ? "" : value)}
+                title={`Show only applications whose PCC status is "${value}"`}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border flex items-center gap-1.5 ${
+                  active ? activeCls : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700"
+                }`}
+              >
+                {label}
+                <span className={`min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${active ? "bg-white/25 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200"}`}>
+                  {count.toLocaleString("en-IN")}
+                </span>
+              </button>
+            );
+          })}
           {!restricted && selectedIds.size > 0 && (
             <button
               onClick={bulkAcceptSelected}
