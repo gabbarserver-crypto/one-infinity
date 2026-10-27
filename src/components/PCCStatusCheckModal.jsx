@@ -34,7 +34,9 @@ const PCC_STAGE_LABELS = {
 function mapToSteps(status) {
   const timeline = status?.timeline || [];
   const byStage = {};
-  timeline.forEach((entry) => { byStage[entry.stage] = entry; });
+  // A re-submitted application repeats a stage (e.g. a 2nd "Pending"); the
+  // portal's own page shows the first one, so keep the first.
+  timeline.forEach((entry) => { if (!byStage[entry.stage]) byStage[entry.stage] = entry; });
 
   return PCC_STAGE_ORDER.map((stage) => ({
     label: PCC_STAGE_LABELS[stage] || stage,
@@ -97,7 +99,9 @@ async function persistPccStatus(row, status) {
 
   const updates = { pcc_timeline: timeline, pcc_last_synced_at: new Date().toISOString() };
   if (currentStage) updates.pcc_stage = currentStage;
-  if (row.pcc_status !== "Rejected" && row.pcc_status !== "Police Case") {
+  if (status?.status === "Rejected") {
+    updates.pcc_status = "Rejected";
+  } else if (row.pcc_status !== "Rejected" && row.pcc_status !== "Police Case") {
     updates.pcc_status = reached.has("Certificate Issued") ? "Certificate Issued" : "Under Verification";
   }
   const { error } = await supabase.from("applications").update(updates).eq("id", row.id);
@@ -236,6 +240,19 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
   const status = liveStatus || (row.pcc_timeline?.length ? { timeline: row.pcc_timeline } : null);
   const steps = mapToSteps(status);
   const lastStep = steps[steps.length - 1];
+  // Rejected: the portal's current status says so (live search), or the stored
+  // row is Rejected and its stored timeline carries the rejection entry.
+  const rejectedEntry = [...(status?.timeline || [])].reverse().find((t) => t.stage === "Rejected") || null;
+  const isRejected = liveStatus
+    ? liveStatus.status === "Rejected"
+    : row.pcc_status === "Rejected" && Boolean(rejectedEntry);
+  const rejectionBanner = isRejected ? (
+    <div className="mt-4 rounded-lg border border-rose-300 bg-rose-50 text-rose-700 px-3 py-2 text-sm">
+      <div className="font-semibold">Application Rejected</div>
+      {rejectedEntry?.date && <div className="text-xs mt-0.5">{rejectedEntry.date}</div>}
+      <div className="mt-1">{rejectedEntry?.description || liveStatus?.statusDescription || "Your application has been rejected."}</div>
+    </div>
+  ) : null;
   // Show the stored (auto-sync) progress whenever the live search didn't
   // return one -- either before searching, or when the portal's status call
   // came back empty.
@@ -280,6 +297,7 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
           <p className="text-sm text-slate-400 dark:text-slate-500 py-4 text-center">No matching application found.</p>
         )}
 
+        {usingStoredTimeline && rejectionBanner}
         {usingStoredTimeline && (
           <div className="mt-4">
             <div className="flex items-center justify-between mb-2">
@@ -387,6 +405,7 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
 
             {liveStatus && (
               <>
+                {rejectionBanner}
                 <h4 className="font-semibold text-slate-700 dark:text-slate-300 mt-5 mb-3">Application Progress</h4>
                 <ul>
                   {steps.map((s) => (

@@ -186,6 +186,11 @@ async function fetchApplicationStatus(session, application) {
 export function mapStageToDropdownStatus(status) {
   const timeline = status?.timeline || [];
   const stages = new Set(timeline.map((t) => t.stage));
+  // The portal reports the CURRENT status in status.status ("Rejected" etc.),
+  // and a rejected application also has a "Rejected" entry in its timeline
+  // with the reason. A rejected application can be re-submitted, in which case
+  // status.status moves on and it stops counting as rejected.
+  if (status?.status === "Rejected") return "Rejected";
   if (stages.has("Certificate Issued")) return "Certificate Issued";
   if (timeline.length > 0) return "Under Verification";
   return null; // no timeline data back — don't overwrite whatever's there
