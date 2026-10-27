@@ -44,7 +44,7 @@ export default function AadhaarFillButton({ onFill, hint = "Please double-check 
         disabled={busy}
         className="w-full border-2 border-dashed border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30 text-blue-700 dark:text-blue-300 font-semibold py-2 rounded-xl text-sm disabled:opacity-50"
       >
-        {busy ? `Reading Aadhaar…${pct ? ` ${pct}%` : ""}` : "📄 Upload Aadhaar to auto-fill (name, father name, DOB, address)"}
+        {busy ? `Reading Aadhaar…${pct ? ` ${pct}%` : ""}` : "📄 Aadhaar upload karke auto-fill karein"}
       </button>
       {note && <p className="text-xs text-emerald-600 mt-1.5">{note}</p>}
       {err && <p className="text-xs text-rose-600 mt-1.5">{err}</p>}

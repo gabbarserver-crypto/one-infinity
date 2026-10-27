@@ -419,6 +419,15 @@ function findPccRto(rtoList) {
   );
 }
 
+// True when this row's RTO is unset or is just the auto-added "PCC" marker
+// (as opposed to a real RTO office the staff picked, e.g. for a CVR A that
+// now also needs a PCC). Only then does the table show the "PCC" badge.
+function rtoIsPccMarker(row, rtoList) {
+  if (!row.rto_id) return true;
+  const name = (rtoList.find((x) => x.id === row.rto_id)?.name || "").trim().toLowerCase();
+  return name.includes("pcc");
+}
+
 // Effective "does this specific application need a PCC No." — the service
 // (e.g. LL RIC) sets the default via pcc_required, but that's one flag
 // shared by every application under it, and LL RIC only needs PCC in
@@ -1736,7 +1745,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     application: (r) => r.application_no || "",
     lldl: (r) => r.ll_dl_no || "",
     pccno: (r) => r.pcc_no || "",
-    rto: (r) => (pccNeeded(r) ? "PCC" : rtoList.find((x) => x.id === r.rto_id)?.name || ""),
+    rto: (r) => (pccNeeded(r) && rtoIsPccMarker(r, rtoList) ? "PCC" : rtoList.find((x) => x.id === r.rto_id)?.name || ""),
     agency: (r) => agencyList.find((x) => x.id === r.agency_id)?.name || "",
     slot: (r) => r.slot_time || "",
     mobile: (r) => r.mobile || "",
@@ -2517,7 +2526,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                 )}
                 {visibleCols.rto && (
                   <td className="px-3 py-2">
-                    {pccNeeded(r) ? (
+                    {pccNeeded(r) && rtoIsPccMarker(r, rtoList) ? (
                       // PCC (and anything bundling it, like LL RIC) never
                       // needs an actual RTO office — showing "PCC" here
                       // instead of leaving it blank makes it a quick visual
@@ -2536,7 +2545,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                         value={r.rto_id}
                         options={rtoList}
                         placeholder="Select RTO"
-                        disabled={!r.services?.rto_required}
+                        disabled={!r.services?.rto_required && !pccNeeded(r)}
                         readOnly={!!r.rto_id}
                         readOnlyTitle={FILLED_LOCK_TITLE}
                         onSave={(v) => updateRowField(r.id, "rto_id", v || null)}
@@ -4377,7 +4386,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
             </Field>
           </>
         )}
-        {!pccNeeded(app) && app.services?.rto_required && (
+        {(app.services?.rto_required || pccNeeded(app)) && (
           <Field label="RTO">
             <EditableSelect
               width="w-full"
@@ -4386,6 +4395,9 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
               placeholder="Select RTO"
               onSave={(v) => onSaveField(app.id, "rto_id", v || null)}
             />
+            {pccNeeded(app) && rtoIsPccMarker(app, rtoList) && (
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Abhi table me "PCC" dikh raha hai — asli RTO chunne par wahi dikhega.</p>
+            )}
           </Field>
         )}
         {app.services?.slot_booking_required && (
@@ -4509,9 +4521,10 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
     return (
       <>
       <Modal title={`Application — ${app.draft_code}`} onClose={onClose} size="xl">
-        <div className="rounded-xl border border-slate-800/80 bg-slate-950/30 px-3 py-2.5 mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
-          <span><span className="font-semibold text-slate-600 dark:text-slate-300">Dealer:</span> {dealerLabel(app.dealers) || "—"}</span>
-          <span><span className="font-semibold text-slate-600 dark:text-slate-300">Service:</span> {serviceLabel(app.services) || "—"}</span>
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-slate-950/30 px-4 py-3 mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-800 dark:text-slate-100">
+          <span><span className="font-semibold text-slate-500 dark:text-slate-400">Dealer:</span> <span className="font-bold">{dealerLabel(app.dealers) || "—"}</span></span>
+          <span><span className="font-semibold text-slate-500 dark:text-slate-400">Service:</span> <span className="font-bold">{serviceLabel(app.services) || "—"}</span></span>
+          <span><span className="font-semibold text-slate-500 dark:text-slate-400">RTO:</span> <span className="font-bold">{rtoList.find((x) => x.id === app.rto_id)?.name || "—"}</span></span>
           <span className="flex items-center gap-1.5">
             <StatusBadge status={app.status} />
             {getProcessingStage(app) && (
@@ -4522,7 +4535,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
         </div>
         {QuickActionBar}
 
-        <div className="grid lg:grid-cols-[minmax(250px,0.9fr)_minmax(320px,1.15fr)_minmax(240px,0.85fr)] gap-4 items-start">
+        <div className="grid lg:grid-cols-[minmax(300px,1fr)_minmax(340px,1.1fr)_minmax(260px,0.8fr)] gap-5 items-start">
           {/* Column 1: applicant details + staff assignment */}
           <div>
             <Card title="Applicant Details" className="mb-4 overflow-hidden">
