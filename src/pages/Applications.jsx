@@ -377,6 +377,20 @@ function PCCNoPopup({ pccNo, pccStatus, pccRejectReason, pccNotRequired, pccCert
 // typed in so far (no separate DB column, purely computed for display).
 // Services that don't require PCC (e.g. "LL RIC without PCC") never
 // mention PCC here, since it's not expected to be filled for them.
+function pccStageLabel(pccStatus) {
+  switch (pccStatus) {
+    case "Certificate Issued": return "PCC Issued";
+    case "Rejected": return "PCC Rejected";
+    case "Under Verification": return "PCC Under Verification";
+    case "Police Case": return "PCC Police Case";
+    default: return "PCC Under Process";
+  }
+}
+// Text colour for the stage label — matches the PCC No colours.
+function stageTextClass(row) {
+  if (!row || !pccNeeded(row) || !row.pcc_no) return "text-slate-400 dark:text-slate-500";
+  return PCC_STATUS_STYLES[row.pcc_status] || "text-slate-400 dark:text-slate-500";
+}
 function getProcessingStage(row) {
   if (!row || row.status !== "Accepted") return null;
   const pccRequired = pccNeeded(row);
@@ -395,9 +409,12 @@ function getProcessingStage(row) {
     if (lldlRequired && hasLldlNo) return `${serviceLabel(row.services)} Issued`;
     return hasAppNo ? "Application No. generated" : "Awaiting Application No.";
   }
-  if (hasAppNo && hasPccNo) return "Application No. generated & PCC Under Process";
+  // Once a PCC No exists, show where that PCC actually stands (same status
+  // that colours the PCC No column) instead of always "Under Process".
+  const pccLabel = pccStageLabel(row.pcc_status);
+  if (hasAppNo && hasPccNo) return `Application No. generated & ${pccLabel}`;
   if (hasAppNo && !hasPccNo) return "Application No. generated & PCC Pending";
-  if (!hasAppNo && hasPccNo) return "PCC Under Process";
+  if (!hasAppNo && hasPccNo) return pccLabel;
   return "Awaiting Application No. & PCC";
 }
 
@@ -2681,7 +2698,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                       <StatusBadge status={r.status} />
                     </button>
                     {getProcessingStage(r) && (
-                      <span className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap">{getProcessingStage(r)}</span>
+                      <span className={`text-[11px] font-medium whitespace-nowrap ${stageTextClass(r)}`}>{getProcessingStage(r)}</span>
                     )}
                   </div>
                 </td>
