@@ -388,8 +388,25 @@ function pccStageLabel(pccStatus) {
 }
 // Text colour for the stage label — matches the PCC No colours.
 function stageTextClass(row) {
+  // LL/DL No. filled: a real number (has digits) = Issued -> green; hand-typed
+  // text (e.g. "ALREADY DL") -> neutral. Both override the PCC colour.
+  if (row?.status === "Accepted" && row.services?.ll_dl_no_required !== false) {
+    const lldl = String(row.ll_dl_no || "").trim();
+    if (lldl) return isManualLldlText(lldl) ? "text-slate-500 dark:text-slate-400" : "text-green-600 dark:text-green-400";
+  }
   if (!row || !pccNeeded(row) || !row.pcc_no) return "text-slate-400 dark:text-slate-500";
   return PCC_STATUS_STYLES[row.pcc_status] || "text-slate-400 dark:text-slate-500";
+}
+// LL/DL No. normally holds a real number (e.g. "DL1/0168619/2026"). Staff
+// sometimes type a plain remark instead (e.g. "ALREADY DL") — no digits at
+// all — and that text is then shown as-is in the status instead of "Issued".
+function isManualLldlText(v) {
+  const t = String(v || "").trim();
+  return !!t && !/\d/.test(t);
+}
+// Application fee counts as paid once the Fee (rto_fee) has been entered.
+function isApplicationFeePaid(row) {
+  return Number(row?.rto_fee) > 0;
 }
 function getProcessingStage(row) {
   if (!row || row.status !== "Accepted") return null;
@@ -400,20 +417,24 @@ function getProcessingStage(row) {
   const lldlRequired = row.services?.ll_dl_no_required !== false;
   const hasAppNo = !!row.application_no;
   const hasPccNo = !!row.pcc_no;
-  const hasLldlNo = !!row.ll_dl_no;
+  const lldlNo = String(row.ll_dl_no || "").trim();
+  // Once the LL/DL No. has come back the application is done: a real number
+  // -> "<Service> Issued" (e.g. "LL RIC Issued"); hand-typed text -> that
+  // text itself (e.g. "ALREADY DL"). Applies whether or not PCC is needed.
+  if (lldlRequired && lldlNo) {
+    return isManualLldlText(lldlNo) ? lldlNo : `${serviceLabel(row.services)} Issued`;
+  }
+  // Application No. entered -> "Application No. generated"; once the fee is
+  // paid -> "Application FEE PAID".
+  const appLabel = isApplicationFeePaid(row) ? "Application FEE PAID" : "Application No. generated";
   if (!pccRequired) {
-    // LL/DL-type services (Learning Licence, Driving Licence, CART, etc.)
-    // — once the LL/DL No. itself has come back, the application has moved
-    // past "application submitted" to actually being issued, so say that
-    // instead of the generic "Application No. generated".
-    if (lldlRequired && hasLldlNo) return `${serviceLabel(row.services)} Issued`;
-    return hasAppNo ? "Application No. generated" : "Awaiting Application No.";
+    return hasAppNo ? appLabel : "Awaiting Application No.";
   }
   // Once a PCC No exists, show where that PCC actually stands (same status
   // that colours the PCC No column) instead of always "Under Process".
   const pccLabel = pccStageLabel(row.pcc_status);
-  if (hasAppNo && hasPccNo) return `Application No. generated & ${pccLabel}`;
-  if (hasAppNo && !hasPccNo) return "Application No. generated & PCC Pending";
+  if (hasAppNo && hasPccNo) return `${appLabel} & ${pccLabel}`;
+  if (hasAppNo && !hasPccNo) return `${appLabel} & PCC Pending`;
   if (!hasAppNo && hasPccNo) return pccLabel;
   return "Awaiting Application No. & PCC";
 }
@@ -500,6 +521,7 @@ function dealerLabel(d) {
 const UNDER_REVIEW_STAGES = new Set([
   "Awaiting Application No. & PCC",
   "Application No. generated & PCC Pending",
+  "Application FEE PAID & PCC Pending",
 ]);
 
 function SortableTh({ column, label, sortKey, sortDir, onSort }) {

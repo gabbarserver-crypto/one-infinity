@@ -13,7 +13,7 @@ import { todayIST } from "../lib/dates";
 import { SERVER_API_BASE } from "../lib/serverApi";
 import PCCStatusCheckModal, { normalizePccApplicationNumber, stripKinPrefix, persistPccStatus } from "../components/PCCStatusCheckModal";
 import * as XLSX from "xlsx";
-import { ArrowUp, ArrowDown, ArrowUpDown, RefreshCw, Pencil, Download, Loader2, Upload, FileText } from "lucide-react";
+import { ArrowUp, ArrowDown, ArrowUpDown, RefreshCw, Pencil, Download, Loader2, Upload } from "lucide-react";
 import {
   PCC_STATUS_STYLES,
   getProcessingStage,
@@ -61,6 +61,27 @@ function plainPccNo(pccNo) {
 }
 function certificateUrl(path) {
   return path ? supabase.storage.from(CERT_BUCKET).getPublicUrl(path).data.publicUrl : "";
+}
+
+// Download the stored certificate as "<PCC No>.pdf". Falls back to opening it
+// in a new tab if the browser blocks the blob download.
+async function downloadCertificate(row) {
+  const url = certificateUrl(row.pcc_certificate_path);
+  if (!url) return;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blobUrl = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = `${plainPccNo(row.pcc_no) || row.draft_code || "PCC"}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+  } catch {
+    window.open(url, "_blank", "noopener");
+  }
 }
 
 // Same storage path / columns the app already uses for a certificate
@@ -757,10 +778,20 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
                         {r.pcc_no ? (
                           <>
                           <button
-                            onClick={() => checkRowPcc(r)}
-                            disabled={running}
-                            title={isDraftPcc(r.pcc_no) ? "Drafted PCC number — not trackable until the actual PCC number is generated" : "Click to track this application on the Delhi Police portal"}
-                            className={`inline-flex items-center gap-1 text-xs font-semibold hover:underline ${PCC_STATUS_STYLES[r.pcc_status] || "text-blue-600 dark:text-blue-300"}`}
+                            onClick={() => (r.pcc_certificate_path ? downloadCertificate(r) : checkRowPcc(r))}
+                            disabled={running && !r.pcc_certificate_path}
+                            title={
+                              r.pcc_certificate_path
+                                ? "PCC certificate uploaded — click to download"
+                                : isDraftPcc(r.pcc_no)
+                                  ? "Drafted PCC number — not trackable until the actual PCC number is generated"
+                                  : "Click to track this application on the Delhi Police portal"
+                            }
+                            className={`inline-flex items-center gap-1 text-xs font-semibold hover:underline ${
+                              r.pcc_certificate_path
+                                ? "text-blue-600 dark:text-blue-400"
+                                : PCC_STATUS_STYLES[r.pcc_status] || "text-blue-600 dark:text-blue-300"
+                            }`}
                           >
                             {r.pcc_no}
                           </button>
@@ -776,17 +807,6 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
                         <div className="flex items-center gap-2">
                           <StatusBadge status={r.status} />
                           {stage && <span className={`text-[11px] font-medium whitespace-nowrap ${stageTextClass(r)}`}>{stage}</span>}
-                          {r.pcc_certificate_path && (
-                            <a
-                              href={certificateUrl(r.pcc_certificate_path)}
-                              target="_blank"
-                              rel="noreferrer"
-                              title="Open PCC certificate"
-                              className="text-slate-400 hover:text-blue-500"
-                            >
-                              <FileText size={14} />
-                            </a>
-                          )}
                         </div>
                       </td>
                     </tr>

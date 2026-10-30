@@ -898,9 +898,11 @@ function getProcessingStage(row) {
   const lldlRequired = row.services?.ll_dl_no_required !== false;
   const hasAppNo = !!row.application_no;
   const hasPccNo = !!row.pcc_no;
-  const hasLldlNo = !!row.ll_dl_no;
+  const lldlNo = String(row.ll_dl_no || "").trim();
+  // Real LL/DL number -> "<Service> Issued"; hand-typed text with no digits
+  // (e.g. "ALREADY DL") is shown as-is. Same rule as the admin side.
+  if (lldlRequired && lldlNo) return /\d/.test(lldlNo) ? `${serviceLabel(row.services)} Issued` : lldlNo;
   if (!pccRequired) {
-    if (lldlRequired && hasLldlNo) return `${serviceLabel(row.services)} Issued`;
     return hasAppNo ? "Application No. generated" : "Awaiting Application No.";
   }
   if (hasAppNo && hasPccNo) return "Application No. generated & PCC Under Process";
