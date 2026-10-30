@@ -11,7 +11,7 @@ import { Card, StatusBadge, GhostButton } from "../components/UI";
 import { fetchAllRows } from "../lib/fetchAll";
 import { todayIST } from "../lib/dates";
 import { SERVER_API_BASE } from "../lib/serverApi";
-import { normalizePccApplicationNumber, stripKinPrefix, persistPccStatus } from "../components/PCCStatusCheckModal";
+import PCCStatusCheckModal, { normalizePccApplicationNumber, stripKinPrefix, persistPccStatus } from "../components/PCCStatusCheckModal";
 import * as XLSX from "xlsx";
 import { ArrowUp, ArrowDown, ArrowUpDown, RefreshCw, Pencil, Download, Loader2, Upload, FileText } from "lucide-react";
 import {
@@ -92,6 +92,18 @@ async function saveCertificate(row, file) {
   return updates;
 }
 
+// Same CVR / CVR A check the Applications page uses (those never need the PCC RTO).
+function isCvr(service) {
+  const label = String(service?.short_name || service?.parent_service || "").trim().toLowerCase();
+  return label === "cvr" || label === "cvr a";
+}
+
+// PCC is "due": the service needs a PCC (PCC / LL RIC ...), it isn't marked
+// "PCC not required", and no PCC No has been entered yet.
+function isPccDue(r) {
+  return pccNeeded(r) && !String(r.pcc_no || "").trim() && !isCvr(r.services);
+}
+
 // One application: ask the portal, then save the result on the row exactly
 // like the "Check PCC status" modal does.
 async function checkOnePcc(row) {
@@ -113,12 +125,12 @@ async function checkOnePcc(row) {
 
 const PCC_FILTERS = [
   { key: "", label: "All" },
+  { key: "__none__", label: "PCC Due" },
   { key: "Under Verification", label: "Under Verification" },
   { key: "Certificate Issued", label: "Certificate Issued" },
   { key: "Rejected", label: "Rejected" },
   { key: "Police Case", label: "Police Case" },
   { key: "__draft__", label: "PCC Drafted" },
-  { key: "__none__", label: "No PCC No" },
 ];
 
 // Application date if set, otherwise the day it was submitted (in IST).
@@ -229,9 +241,9 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
   const fileInputRef = useRef(null);
   const [uploadProgress, setUploadProgress] = useState(null);
   const [uploadSummary, setUploadSummary] = useState(null);
-  // Single-row PCC check (click on a PCC No): id of the row being checked + a result notice.
-  const [checkingId, setCheckingId] = useState(null);
-  const [rowNotice, setRowNotice] = useState(null); // { ok, text }
+  // Clicking a PCC No opens the same "Track Application" modal as the Applications page.
+  const [pccCheckRow, setPccCheckRow] = useState(null);
+  const [rowNotice, setRowNotice] = useState(null); // { ok, text } (used for drafted numbers)
 
   // Staff who only have the restricted "Applications (Staff View)" tab never
   // see Amount, so this page hides it for them too.
@@ -292,6 +304,8 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
   const pccRows = useMemo(
     () => rows.filter((r) => {
       if (rowDateISO(r) < MIN_DATE_ISO) return false;
+      // PCC due (needed, not marked "not required", no PCC No yet), whatever the RTO.
+      if (isPccDue(r)) return true;
       // A PCC No plus RTO explicitly set to PCC (e.g. CVR / CVR A rows whose
       // RTO was changed to PCC) belongs here. A PCC No alone does not.
       if (String(r.pcc_no || "").trim() && r.rto_id) {
@@ -441,29 +455,32 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
     setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, father_husband_name: name } : r)));
   };
 
-  const checkRowPcc = async (row) => {
-    if (checkingId || running || !row.pcc_no) return;
+  const checkRowPcc = (row) => {
+    if (running || !row.pcc_no) return;
     if (isDraftPcc(row.pcc_no)) {
       setRowNotice({ ok: false, text: `${row.draft_code} (${row.pcc_no}): this is a drafted PCC number — the portal can't track it. Once the PCC fee is paid and the actual PCC number is generated, update the PCC No and check again.` });
       return;
     }
-    setCheckingId(row.id);
     setRowNotice(null);
-    try {
-      const updates = await checkOnePcc(row);
-      if (!updates) {
-        setRowNotice({ ok: true, text: `${row.draft_code} (${row.pcc_no}): found on portal, but no progress timeline yet.` });
-      } else {
-        setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, ...updates } : r)));
-        const newStatus = updates.pcc_status || row.pcc_status;
-        const stage = updates.pcc_stage ? ` (${updates.pcc_stage})` : "";
-        setRowNotice({ ok: true, text: `${row.draft_code} (${row.pcc_no}): ${newStatus || "updated"}${stage}` });
-      }
-    } catch (e) {
-      const hint = !(row.father_husband_name || "").trim() ? " — Father name is empty, add it and try again." : "";
-      setRowNotice({ ok: false, text: `${row.draft_code} (${row.pcc_no}): ${e?.message || "Check failed"}${hint}` });
-    } finally {
-      setCheckingId(null);
+    setPccCheckRow(row);
+  };
+
+  // Same as the Applications page: after a certificate is saved from the
+  // modal, mirror it onto the Documents "CERTIFICATE" row.
+  const onCertificateSaved = async (id) => {
+    const path = `pcc-certificates/${id}.pdf`;
+    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, pcc_certificate_path: path, pcc_stage: "Certificate Issued", pcc_status: "Certificate Issued" } : r)));
+    const { data: docRow } = await supabase
+      .from("application_documents")
+      .select("id")
+      .eq("application_id", id)
+      .ilike("name", "certificate")
+      .maybeSingle();
+    if (docRow) {
+      await supabase
+        .from("application_documents")
+        .update({ file_url: certificateUrl(path), status: "Pending", reject_reason: null })
+        .eq("id", docRow.id);
     }
   };
 
@@ -741,11 +758,10 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
                           <>
                           <button
                             onClick={() => checkRowPcc(r)}
-                            disabled={checkingId === r.id || running}
-                            title={isDraftPcc(r.pcc_no) ? "Drafted PCC number — not trackable until the actual PCC number is generated" : "Click to check this PCC status on the Delhi Police portal"}
-                            className={`inline-flex items-center gap-1 text-xs font-semibold hover:underline disabled:cursor-wait ${PCC_STATUS_STYLES[r.pcc_status] || "text-blue-600 dark:text-blue-300"}`}
+                            disabled={running}
+                            title={isDraftPcc(r.pcc_no) ? "Drafted PCC number — not trackable until the actual PCC number is generated" : "Click to track this application on the Delhi Police portal"}
+                            className={`inline-flex items-center gap-1 text-xs font-semibold hover:underline ${PCC_STATUS_STYLES[r.pcc_status] || "text-blue-600 dark:text-blue-300"}`}
                           >
-                            {checkingId === r.id && <Loader2 size={11} className="animate-spin" />}
                             {r.pcc_no}
                           </button>
                           {isDraftPcc(r.pcc_no) && (
@@ -793,6 +809,17 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
           </div>
         </div>
       </Card>
+
+      {pccCheckRow && (
+        <PCCStatusCheckModal
+          row={pccCheckRow}
+          onClose={() => setPccCheckRow(null)}
+          onStatusSynced={(id, updates) =>
+            setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...updates } : r)))
+          }
+          onCertificateSaved={onCertificateSaved}
+        />
+      )}
     </div>
   );
 }
