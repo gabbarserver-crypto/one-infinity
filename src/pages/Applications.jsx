@@ -427,8 +427,16 @@ function serviceLabel(s) {
 // so filtering/searching RTO="PCC" surfaces every PCC-related application
 // in one place — not just ones on a real RTO's docket.
 function isPccRelatedService(service) {
+  if (isCvrService(service)) return false;
   const label = `${service?.parent_service || ""} ${service?.short_name || ""}`.toLowerCase();
   return label.includes("pcc");
+}
+// CVR / CVR A are RTO-office services (the PCC service was called CVR only
+// until Feb 2026): their RTO is a real RTO office, never the "PCC" marker.
+// Matches the label the table shows (short name, else service name).
+function isCvrService(service) {
+  const label = String(service?.short_name || service?.parent_service || "").trim().toLowerCase();
+  return label === "cvr" || label === "cvr a";
 }
 // The standalone PCC service itself (not "LL RIC (with PCC Required)" etc.,
 // which still charge an RTO fee alongside the PCC fee). For these only the
@@ -450,6 +458,7 @@ function findPccRto(rtoList) {
 // (as opposed to a real RTO office the staff picked, e.g. for a CVR A that
 // now also needs a PCC). Only then does the table show the "PCC" badge.
 function rtoIsPccMarker(row, rtoList) {
+  if (isCvrService(row.services)) return false; // CVR / CVR A never get the PCC RTO
   if (!row.rto_id) return true;
   const name = (rtoList.find((x) => x.id === row.rto_id)?.name || "").trim().toLowerCase();
   return name.includes("pcc");
@@ -5285,6 +5294,19 @@ function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null }) {
     </div>
   );
 }
+
+// Helpers shared with the standalone PCC page (pages/PccApplications.jsx).
+export {
+  PCC_STATUS_STYLES,
+  getProcessingStage,
+  stageTextClass,
+  pccNeeded,
+  rtoIsPccMarker,
+  isPccService,
+  serviceLabel,
+  dealerLabel,
+  isoToDDMMYYYY,
+};
 
 // A restricted view of the same Applications page for general staff — same
 // list, same actions (status updates, chat, calling, document review), but

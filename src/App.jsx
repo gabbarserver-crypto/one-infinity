@@ -13,6 +13,7 @@ import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import Applications, { StaffApplications, StaffDraftApplications, DraftApplications } from "./pages/Applications";
 import ApplicationExcel from "./pages/ApplicationExcel";
+import PccApplications from "./pages/PccApplications";
 import Payments from "./pages/Payments";
 import Ledger from "./pages/Ledger";import Reports from "./pages/Reports";
 import Masters from "./pages/Masters";
@@ -66,6 +67,7 @@ const NAV = [
   { key: "staffApplications", label: "Applications", Component: StaffApplications },
   { key: "staffDraftApplications", label: "Draft", Component: StaffDraftApplications },
   { key: "draftApplications", label: "Draft", Component: DraftApplications },
+  { key: "pccApplications", label: "PCC", Component: PccApplications },
   { key: "chats", label: "Call/Chat", Component: Chats },
   { key: "masters", label: "Masters", Component: Masters },
   { key: "payments", label: "Payments", Component: Payments },
@@ -94,6 +96,10 @@ const MODULE_BY_NAV_KEY = {
   // anyone who can already view Applications sees this tab too, no new
   // permissions-table row required for existing roles.
   draftApplications: "applications",
+  // PCC list: visible to anyone who can view Applications OR the restricted
+  // Staff View (see visibleNav below). Read-only, so this module is only used
+  // for the edit/approve flags, which the page ignores.
+  pccApplications: "applications",
   chats: "chats",
   masters: "masters",
   payments: "payments",
@@ -173,7 +179,11 @@ export default function App() {
   const visibleNav = React.useMemo(() => {
     if (!staff) return NAV;
     if (isAdmin) return NAV.filter((n) => n.key !== "staffApplications" && n.key !== "staffDraftApplications");
-    return NAV.filter((n) => n.key !== "applicationExcel" && permMap[MODULE_BY_NAV_KEY[n.key]]?.can_view);
+    return NAV.filter((n) => {
+      if (n.key === "applicationExcel") return false;
+      if (n.key === "pccApplications") return !!(permMap.applications?.can_view || permMap.staffApplications?.can_view);
+      return permMap[MODULE_BY_NAV_KEY[n.key]]?.can_view;
+    });
   }, [staff, isAdmin, permMap]);
 
   // If the current tab isn't in the visible set (role changed, or the

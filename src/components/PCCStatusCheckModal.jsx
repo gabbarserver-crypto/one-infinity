@@ -58,7 +58,7 @@ export function normalizePccApplicationNumber(pccNo) {
 // Strip any leading "S/O", "W/O", "D/O", "C/O" (with or without punctuation)
 // in case it was typed into the Father/Husband field — the portal expects
 // just the plain name, with no relation prefix.
-function stripKinPrefix(name) {
+export function stripKinPrefix(name) {
   if (!name) return name;
   return name.replace(/^\s*(s\/o|w\/o|d\/o|c\/o)[\s:.]*?/i, "").trim();
 }
@@ -106,7 +106,7 @@ function buildRejectionRemark(status, existingRemarks) {
 // dropdown / stepper update right away instead of waiting for the cron sync.
 // Same mapping as api/_lib/pccClient.js (mapStageToDropdownStatus). Rejected /
 // Police Case are never overwritten, matching the server sync.
-async function persistPccStatus(row, status) {
+export async function persistPccStatus(row, status) {
   const timeline = status?.timeline || [];
   if (!timeline.length) return null;
   const reached = new Set(timeline.map((t) => t.stage));
