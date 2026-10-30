@@ -411,6 +411,14 @@ function isPccRelatedService(service) {
   const label = `${service?.parent_service || ""} ${service?.short_name || ""}`.toLowerCase();
   return label.includes("pcc");
 }
+// The standalone PCC service itself (not "LL RIC (with PCC Required)" etc.,
+// which still charge an RTO fee alongside the PCC fee). For these only the
+// PCC Fee is filled, so the plain Fee (rto_fee) box is disabled.
+function isPccService(service) {
+  const short = (service?.short_name || "").trim().toLowerCase();
+  const full = (service?.parent_service || "").trim().toLowerCase();
+  return short === "pcc" || full === "pcc" || full === "police character certificate";
+}
 function findPccRto(rtoList) {
   return (
     rtoList.find((r) => (r.name || "").trim().toLowerCase() === "pcc") ||
@@ -2415,6 +2423,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                       width="w-14"
                       noSpinner
                       value={r.rto_fee}
+                      disabled={isPccService(r.services)}
                       readOnly={!!r.rto_fee}
                       readOnlyTitle={FILLED_LOCK_TITLE}
                       onSave={(v) => updateRowField(r.id, "rto_fee", v === "" ? null : parseFloat(v))}
@@ -4367,6 +4376,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
           <EditableCell
             type="number" width="w-full" noSpinner
             value={app.rto_fee}
+            disabled={isPccService(app.services)}
             onSave={(v) => onSaveField(app.id, "rto_fee", v === "" ? null : parseFloat(v))}
           />
         </Field>
