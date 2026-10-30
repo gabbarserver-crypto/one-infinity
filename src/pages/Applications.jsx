@@ -147,15 +147,17 @@ function EditableSelect({ value, options, onSave, width = "w-32", placeholder = 
 }
 
 const PCC_STATUS_OPTIONS = ["Under Verification", "Certificate Issued", "Rejected", "Police Case"];
+// Text colour only (no pill / border / background) so the PCC No column
+// stays clean: yellow = Under Verification, green = Certificate Issued,
+// red = Rejected.
 const PCC_STATUS_STYLES = {
-  "Under Verification": "bg-yellow-50 text-yellow-800 border-yellow-300 dark:bg-yellow-500/15 dark:text-yellow-200 dark:border-yellow-500/40",
-  "Certificate Issued": "bg-green-50 text-green-700 border-green-300 dark:bg-green-500/15 dark:text-green-300 dark:border-green-500/40",
-  Rejected: "bg-red-50 text-red-700 border-red-300 dark:bg-red-500/15 dark:text-red-300 dark:border-red-500/40",
-  "Police Case": "bg-orange-50 text-orange-700 border-orange-300 dark:bg-orange-500/15 dark:text-orange-300 dark:border-orange-500/40",
+  "Under Verification": "text-yellow-600 dark:text-yellow-300",
+  "Certificate Issued": "text-green-600 dark:text-green-400",
+  Rejected: "text-red-600 dark:text-red-400",
+  "Police Case": "text-orange-600 dark:text-orange-400",
 };
-// PCC No entered but no status picked yet — previously this got no colour
-// classes at all, so the number showed as dark text on a dark pill.
-const PCC_NO_STATUS_STYLE = "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-200 dark:border-blue-500/40";
+// PCC No entered but no status picked yet.
+const PCC_NO_STATUS_STYLE = "text-blue-600 dark:text-blue-300";
 function PCCNoPopup({ pccNo, pccStatus, pccRejectReason, pccNotRequired, pccCertificatePath, onSave, onOpenPortal, onCheckStatus, onSetNotRequired, onUploadCertificate }) {
   const [open, setOpen] = useState(false);
   const [localNo, setLocalNo] = useState(pccNo || "");
@@ -244,7 +246,7 @@ function PCCNoPopup({ pccNo, pccStatus, pccRejectReason, pccNotRequired, pccCert
             target="_blank"
             rel="noopener noreferrer"
             title="Download saved PCC certificate"
-            className={`px-2.5 py-1 rounded-full text-xs font-semibold border whitespace-nowrap hover:underline ${style}`}
+            className={`text-xs font-semibold whitespace-nowrap hover:underline ${style}`}
           >
             {pccNo}
           </a>
@@ -254,7 +256,7 @@ function PCCNoPopup({ pccNo, pccStatus, pccRejectReason, pccNotRequired, pccCert
             onClick={() => setOpen(true)}
             className={
               pccNo
-                ? `px-2.5 py-1 rounded-full text-xs font-semibold border whitespace-nowrap ${style}`
+                ? `text-xs font-semibold whitespace-nowrap ${style}`
                 : "text-blue-600 text-xs font-semibold hover:underline whitespace-nowrap"
             }
           >
