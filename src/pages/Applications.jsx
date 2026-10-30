@@ -5022,6 +5022,8 @@ function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [cropFile, setCropFile] = useState(null); // signature image waiting in the crop / remove-background modal
+  const [editFile, setEditFile] = useState(null); // already-uploaded image loaded into the Rotate / Crop editor
+  const [loadingEdit, setLoadingEdit] = useState(false);
 
   // Storage path is `${applicationId}/${doc.id}-${file.name}` (see
   // uploadFile below), so the original filename the user uploaded is
@@ -5054,7 +5056,12 @@ function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null }) {
   // Lets staff/admin upload directly here too — e.g. the Learning Licence
   // PDF just downloaded from the Sarathi popup above — instead of only
   // being able to Verify/Reject whatever the dealer already sent.
-  const uploadFileNow = async (file) => {
+  //
+  // Anything uploaded from here is by Admin / staff, so it goes in as
+  // "Verified" straight away (no separate Verify step). `keepStatus` is used
+  // by the Rotate / Crop editor: it replaces the file but leaves the
+  // document's current status and reject reason exactly as they were.
+  const uploadFileNow = async (file, { keepStatus = false } = {}) => {
     if (!file) return;
     if (!applicationId) {
       // Was previously a silent no-op if this component ever got rendered
@@ -5078,16 +5085,66 @@ function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null }) {
       return;
     }
     const { data: urlData } = supabase.storage.from("application-documents").getPublicUrl(path);
+    let changes = { file_url: urlData.publicUrl };
+    if (!keepStatus) {
+      const { data: userData } = await supabase.auth.getUser();
+      const { data: staffRow } = await supabase.from("staff").select("id").eq("auth_user_id", userData?.user?.id).maybeSingle();
+      changes = {
+        ...changes,
+        status: "Verified",
+        reject_reason: null,
+        verified_by: staffRow?.id || null,
+        verified_at: new Date().toISOString(),
+      };
+    }
     const { error: updateErr } = await supabase
       .from("application_documents")
-      .update({ file_url: urlData.publicUrl, status: "Pending", reject_reason: null })
+      .update(changes)
       .eq("id", doc.id);
     setUploading(false);
     if (updateErr) {
       setUploadError("Saved file but failed to update record: " + updateErr.message);
-      return;
+      return false;
     }
     onChanged?.();
+    return true;
+  };
+
+  // Rotate / Crop for an image that's already uploaded: pull it back down,
+  // open it in the editor, and on Save upload the edited copy under a fresh
+  // file name (so the CDN / browser cache can't keep showing the old image),
+  // then best-effort delete the old file from storage.
+  const openEditor = async () => {
+    if (!doc.file_url) return;
+    setLoadingEdit(true);
+    setUploadError("");
+    try {
+      const res = await fetch(doc.file_url, { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const blob = await res.blob();
+      setEditFile(new File([blob], uploadedFileName || "document.jpg", { type: blob.type || "image/jpeg" }));
+    } catch (e) {
+      setUploadError("Couldn't load this image for editing: " + (e?.message || "unknown error"));
+    }
+    setLoadingEdit(false);
+  };
+
+  const saveEdited = async (edited) => {
+    setEditFile(null);
+    const ext = edited.type === "image/png" ? "png" : "jpg";
+    const base = (uploadedFileName || "document")
+      .replace(/\.[^.]+$/, "")
+      .replace(/-cropped$/, "")
+      .replace(/-e[0-9a-z]+$/, "");
+    const renamed = new File([edited], `${base}-e${Date.now().toString(36)}.${ext}`, { type: edited.type });
+    const marker = "/application-documents/";
+    const oldPath = doc.file_url?.includes(marker)
+      ? decodeURIComponent(doc.file_url.split(marker)[1].split("?")[0])
+      : null;
+    const ok = await uploadFileNow(renamed, { keepStatus: true });
+    if (ok && oldPath) {
+      try { await supabase.storage.from("application-documents").remove([oldPath]); } catch { /* best effort */ }
+    }
   };
 
   // Signature images go through the crop + "Remove background" modal first
@@ -5150,6 +5207,11 @@ function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null }) {
             ) : rejectedNote ? null : (
               <span className="text-xs font-semibold text-rose-500">Missing document</span>
             )}
+            {doc.file_url && isImage && (
+              <button disabled={busy || uploading || loadingEdit} onClick={openEditor} className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 disabled:opacity-50">
+                {loadingEdit ? "Loading…" : "⟳ Rotate / Crop"}
+              </button>
+            )}
             {doc.file_url && doc.status !== "Rejected" && doc.status !== "Verified" && (
               <button disabled={busy} onClick={() => setStatus("Verified")} className="text-xs font-semibold text-emerald-600 disabled:opacity-50">✓ Verify</button>
             )}
@@ -5167,7 +5229,7 @@ function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null }) {
         <div className="mx-3 mb-3 rounded-lg bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/40 px-3 py-2 text-xs text-rose-600 dark:text-rose-400">Reason: {doc.reject_reason}</div>
       )}
 
-      {doc.status !== "Verified" && !rejectedNote && (
+      {!rejectedNote && (
         <div className="px-3 pb-3">
           <DocUploadDropzone busy={uploading} onFile={uploadFile} />
           {uploadError && <p className="text-rose-500 text-xs mt-1">{uploadError}</p>}
@@ -5179,6 +5241,16 @@ function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null }) {
           allowBackgroundRemoval
           onClose={() => setCropFile(null)}
           onDone={(f) => { setCropFile(null); uploadFileNow(f); }}
+        />
+      )}
+      {editFile && (
+        <ImageCropModal
+          file={editFile}
+          title="Rotate / Crop"
+          doneLabel="Save"
+          allowBackgroundRemoval={/sign/i.test(doc.name)}
+          onClose={() => setEditFile(null)}
+          onDone={saveEdited}
         />
       )}
     </div>
