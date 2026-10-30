@@ -13,7 +13,7 @@ import { todayIST } from "../lib/dates";
 import { SERVER_API_BASE } from "../lib/serverApi";
 import { normalizePccApplicationNumber, stripKinPrefix, persistPccStatus } from "../components/PCCStatusCheckModal";
 import * as XLSX from "xlsx";
-import { ArrowUp, ArrowDown, ArrowUpDown, RefreshCw, Pencil, Download, Loader2 } from "lucide-react";
+import { ArrowUp, ArrowDown, ArrowUpDown, RefreshCw, Pencil, Download, Loader2, Upload, FileText } from "lucide-react";
 import {
   PCC_STATUS_STYLES,
   getProcessingStage,
@@ -48,6 +48,48 @@ const SKIP_STATUSES = new Set(["Certificate Issued", "Police Case"]);
 function isDraftPcc(pccNo) {
   const digits = String(pccNo || "").replace(/^DLSB-PCC\//i, "").trim();
   return /^\d{14}$/.test(digits);
+}
+
+const CERT_BUCKET = "application-documents";
+
+// "DLSBPCC_202610025858_Certificate.pdf" / "202610025858.pdf" -> "202610025858"
+function pccNoFromFilename(name) {
+  return String(name || "").match(/(?<!\d)\d{12}(?!\d)/)?.[0] || null;
+}
+function plainPccNo(pccNo) {
+  return String(pccNo || "").replace(/^DLSB-PCC\//i, "").trim();
+}
+function certificateUrl(path) {
+  return path ? supabase.storage.from(CERT_BUCKET).getPublicUrl(path).data.publicUrl : "";
+}
+
+// Same storage path / columns the app already uses for a certificate
+// (pcc-certificates/<applicationId>.pdf), so every existing download link works.
+async function saveCertificate(row, file) {
+  const path = `pcc-certificates/${row.id}.pdf`;
+  const { error: upErr } = await supabase.storage
+    .from(CERT_BUCKET)
+    .upload(path, file, { upsert: true, contentType: "application/pdf" });
+  if (upErr) throw upErr;
+
+  const updates = { pcc_certificate_path: path, pcc_stage: "Certificate Issued", pcc_status: "Certificate Issued" };
+  const { error: dbErr } = await supabase.from("applications").update(updates).eq("id", row.id);
+  if (dbErr) throw dbErr;
+
+  // Mirror onto the Documents "CERTIFICATE" row, like the Applications page does.
+  const { data: docRow } = await supabase
+    .from("application_documents")
+    .select("id")
+    .eq("application_id", row.id)
+    .ilike("name", "certificate")
+    .maybeSingle();
+  if (docRow) {
+    await supabase
+      .from("application_documents")
+      .update({ file_url: certificateUrl(path), status: "Pending", reject_reason: null })
+      .eq("id", docRow.id);
+  }
+  return updates;
 }
 
 // One application: ask the portal, then save the result on the row exactly
@@ -183,6 +225,10 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
   const [checkProgress, setCheckProgress] = useState(null);
   const [checkSummary, setCheckSummary] = useState(null);
   const stopRef = useRef(false);
+  // Bulk certificate upload: { done, total } while running, then a summary.
+  const fileInputRef = useRef(null);
+  const [uploadProgress, setUploadProgress] = useState(null);
+  const [uploadSummary, setUploadSummary] = useState(null);
   // Single-row PCC check (click on a PCC No): id of the row being checked + a result notice.
   const [checkingId, setCheckingId] = useState(null);
   const [rowNotice, setRowNotice] = useState(null); // { ok, text }
@@ -196,15 +242,28 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
     (async () => {
       setLoading(true);
       setError("");
-      const [{ data: rt }, res] = await Promise.all([
+      const SELECT_COLS =
+        "id, draft_code, application_date, submitted_at, amount, status, applicant_name, father_husband_name, application_no, ll_dl_no, pcc_no, pcc_status, pcc_stage, pcc_certificate_path, pcc_not_required, rto_id, dealers(name,code,short_name), services(parent_service,short_name,pcc_required,ll_dl_no_required)";
+      const [{ data: rt }, res, withNo] = await Promise.all([
         supabase.from("rtos").select("id, name, code, type").order("name"),
         fetchAllRows(() =>
           supabase
             .from("applications")
             .select(
-              "id, draft_code, application_date, submitted_at, amount, status, applicant_name, father_husband_name, application_no, ll_dl_no, pcc_no, pcc_status, pcc_not_required, rto_id, dealers(name,code,short_name), services!inner(parent_service,short_name,pcc_required,ll_dl_no_required)"
+              "id, draft_code, application_date, submitted_at, amount, status, applicant_name, father_husband_name, application_no, ll_dl_no, pcc_no, pcc_status, pcc_stage, pcc_certificate_path, pcc_not_required, rto_id, dealers(name,code,short_name), services!inner(parent_service,short_name,pcc_required,ll_dl_no_required)"
             )
             .eq("services.pcc_required", true)
+            .order("submitted_at", { ascending: false })
+            .order("id", { ascending: false })
+        ),
+        // Every application that has a PCC No, whatever its service / RTO /
+        // "PCC not required" flags (e.g. CVR A rows that also got a PCC).
+        fetchAllRows(() =>
+          supabase
+            .from("applications")
+            .select(SELECT_COLS)
+            .not("pcc_no", "is", null)
+            .neq("pcc_no", "")
             .order("submitted_at", { ascending: false })
             .order("id", { ascending: false })
         ),
@@ -214,7 +273,11 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
         setError("Couldn't load PCC applications: " + res.error.message);
         setRows([]);
       } else {
-        setRows(res.data || []);
+        // Merge both result sets, de-duplicated by id.
+        const byId = new Map();
+        for (const r of res.data || []) byId.set(r.id, r);
+        for (const r of withNo?.data || []) if (!byId.has(r.id)) byId.set(r.id, r);
+        setRows([...byId.values()]);
       }
       setRtoList(rt || []);
       setLoading(false);
@@ -227,12 +290,16 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
   // the RTO must actually be set to PCC, otherwise it's just "RTO not
   // filled in yet" and not a PCC application.
   const pccRows = useMemo(
-    () => rows.filter((r) =>
-      pccNeeded(r) &&
-      rtoIsPccMarker(r, rtoList) &&
-      (isPccService(r.services) || !!r.rto_id) &&
-      rowDateISO(r) >= MIN_DATE_ISO
-    ),
+    () => rows.filter((r) => {
+      if (rowDateISO(r) < MIN_DATE_ISO) return false;
+      // Anything carrying a PCC No belongs on this page.
+      if (String(r.pcc_no || "").trim()) return true;
+      return (
+        pccNeeded(r) &&
+        rtoIsPccMarker(r, rtoList) &&
+        (isPccService(r.services) || !!r.rto_id)
+      );
+    }),
     [rows, rtoList]
   );
 
@@ -396,6 +463,59 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
     }
   };
 
+  const uploadCertificates = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (files.length === 0 || uploadProgress) return;
+
+    // PCC No (12 digits) -> application row
+    const byNo = new Map();
+    for (const r of rows) {
+      const no = plainPccNo(r.pcc_no);
+      if (no && !byNo.has(no)) byNo.set(no, r);
+    }
+
+    const jobs = [];
+    const seen = new Set();
+    const noMatch = [];
+    let alreadyHave = 0;
+    for (const f of files) {
+      if (!/\.pdf$/i.test(f.name)) { noMatch.push(`${f.name} (not a PDF)`); continue; }
+      const no = pccNoFromFilename(f.name);
+      const row = no ? byNo.get(no) : null;
+      if (!row) { noMatch.push(f.name); continue; }
+      if (seen.has(row.id)) continue; // same certificate twice
+      seen.add(row.id);
+      if (row.pcc_certificate_path) { alreadyHave += 1; continue; }
+      jobs.push({ file: f, row });
+    }
+
+    setUploadSummary(null);
+    setUploadProgress({ done: 0, total: jobs.length });
+    let done = 0;
+    let uploaded = 0;
+    const failed = [];
+    const queue = [...jobs];
+    const worker = async () => {
+      for (;;) {
+        const job = queue.shift();
+        if (!job) return;
+        try {
+          const updates = await saveCertificate(job.row, job.file);
+          uploaded += 1;
+          setRows((rs) => rs.map((r) => (r.id === job.row.id ? { ...r, ...updates } : r)));
+        } catch (e) {
+          failed.push(`${job.file.name}: ${e?.message || "upload failed"}`);
+        }
+        done += 1;
+        setUploadProgress({ done, total: jobs.length });
+      }
+    };
+    await Promise.all(Array.from({ length: 3 }, worker));
+    setUploadProgress(null);
+    setUploadSummary({ total: files.length, uploaded, alreadyHave, noMatch, failed });
+  };
+
   const exportExcel = () => {
     const headers = [
       "Draft ID", "Date", ...(showAmount ? ["Amount"] : []), "Dealer", "Service",
@@ -436,6 +556,23 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
           {running && (
             <GhostButton onClick={() => { stopRef.current = true; }} className="!px-3 !py-1.5 !text-xs">Stop</GhostButton>
           )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            multiple
+            className="hidden"
+            onChange={(e) => uploadCertificates(e.target.files)}
+          />
+          <GhostButton
+            onClick={() => fileInputRef.current?.click()}
+            disabled={loading || !!uploadProgress}
+            title="Select many certificate PDFs at once — each is matched to its application by the 12-digit PCC number in the file name"
+            className="!px-3 !py-2 !text-sm inline-flex items-center gap-1.5"
+          >
+            {uploadProgress ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+            {uploadProgress ? `Uploading ${uploadProgress.done}/${uploadProgress.total}…` : "Upload certificates"}
+          </GhostButton>
           <GhostButton
             onClick={exportExcel}
             disabled={loading || sorted.length === 0}
@@ -462,6 +599,31 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
             className="h-full bg-blue-600 transition-all"
             style={{ width: `${Math.round((checkProgress.done / Math.max(1, checkProgress.total)) * 100)}%` }}
           />
+        </div>
+      )}
+
+      {uploadSummary && (
+        <div className="mb-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm text-slate-700 dark:text-slate-200">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <span className="font-semibold">Certificates:</span> {uploadSummary.total} file{uploadSummary.total === 1 ? "" : "s"} selected —{" "}
+              <span className="text-green-600 dark:text-green-400 font-semibold">{uploadSummary.uploaded} uploaded</span>,{" "}
+              {uploadSummary.alreadyHave} already had a certificate (skipped)
+              {uploadSummary.noMatch.length > 0 && <>, <span className="text-amber-600 dark:text-amber-400 font-semibold">{uploadSummary.noMatch.length} no matching application</span></>}
+              {uploadSummary.failed.length > 0 && <>, <span className="text-red-600 dark:text-red-400 font-semibold">{uploadSummary.failed.length} failed</span></>}
+              .
+            </div>
+            <button onClick={() => setUploadSummary(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-lg leading-none" aria-label="Dismiss">×</button>
+          </div>
+          {(uploadSummary.noMatch.length > 0 || uploadSummary.failed.length > 0) && (
+            <details className="mt-2 text-xs">
+              <summary className="cursor-pointer text-slate-500 dark:text-slate-400">Show details</summary>
+              <ul className="mt-1 space-y-0.5 max-h-40 overflow-y-auto">
+                {uploadSummary.noMatch.map((n, i) => <li key={"n" + i} className="text-amber-600 dark:text-amber-400">No match: {n}</li>)}
+                {uploadSummary.failed.map((n, i) => <li key={"f" + i} className="text-red-500">{n}</li>)}
+              </ul>
+            </details>
+          )}
         </div>
       )}
 
@@ -594,6 +756,17 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
                         <div className="flex items-center gap-2">
                           <StatusBadge status={r.status} />
                           {stage && <span className={`text-[11px] font-medium whitespace-nowrap ${stageTextClass(r)}`}>{stage}</span>}
+                          {r.pcc_certificate_path && (
+                            <a
+                              href={certificateUrl(r.pcc_certificate_path)}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="Open PCC certificate"
+                              className="text-slate-400 hover:text-blue-500"
+                            >
+                              <FileText size={14} />
+                            </a>
+                          )}
                         </div>
                       </td>
                     </tr>
