@@ -256,8 +256,8 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
             .order("submitted_at", { ascending: false })
             .order("id", { ascending: false })
         ),
-        // Every application that has a PCC No, whatever its service / RTO /
-        // "PCC not required" flags (e.g. CVR A rows that also got a PCC).
+        // Every application that has a PCC No, whatever its service / flags;
+        // the page then keeps only those whose RTO is PCC (see pccRows).
         fetchAllRows(() =>
           supabase
             .from("applications")
@@ -292,8 +292,12 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
   const pccRows = useMemo(
     () => rows.filter((r) => {
       if (rowDateISO(r) < MIN_DATE_ISO) return false;
-      // Anything carrying a PCC No belongs on this page.
-      if (String(r.pcc_no || "").trim()) return true;
+      // A PCC No plus RTO explicitly set to PCC (e.g. CVR / CVR A rows whose
+      // RTO was changed to PCC) belongs here. A PCC No alone does not.
+      if (String(r.pcc_no || "").trim() && r.rto_id) {
+        const rtoName = (rtoList.find((x) => x.id === r.rto_id)?.name || "").trim().toLowerCase();
+        if (rtoName.includes("pcc")) return true;
+      }
       return (
         pccNeeded(r) &&
         rtoIsPccMarker(r, rtoList) &&
