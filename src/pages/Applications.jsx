@@ -156,6 +156,7 @@ const PCC_STATUS_STYLES = {
   Rejected: "text-red-600 dark:text-red-400",
   "Police Case": "text-orange-600 dark:text-orange-400",
 };
+const DRAFTED_PCC_STYLE = "text-amber-600 dark:text-amber-400";
 // PCC No entered but no status picked yet.
 const PCC_NO_STATUS_STYLE = "text-blue-600 dark:text-blue-300";
 function PCCNoPopup({ pccNo, pccStatus, pccRejectReason, pccNotRequired, pccCertificatePath, onSave, onOpenPortal, onCheckStatus, onSetNotRequired, onUploadCertificate }) {
@@ -377,7 +378,15 @@ function PCCNoPopup({ pccNo, pccStatus, pccRejectReason, pccNotRequired, pccCert
 // typed in so far (no separate DB column, purely computed for display).
 // Services that don't require PCC (e.g. "LL RIC without PCC") never
 // mention PCC here, since it's not expected to be filled for them.
-function pccStageLabel(pccStatus) {
+// A drafted PCC No has MORE than the 12 digits of a real one (e.g. 14 digits,
+// "20261030619207"). The drafted number isn't trackable and its PCC fee has
+// not been paid yet; only the proper 12-digit number means the fee was paid.
+function isDraftedPccNo(pccNo) {
+  const digits = String(pccNo || "").replace(/^DLSB-PCC\//i, "").trim();
+  return /^\d{13,}$/.test(digits);
+}
+function pccStageLabel(pccStatus, pccNo) {
+  if (isDraftedPccNo(pccNo)) return "PCC Drafted Fee Not Paid";
   switch (pccStatus) {
     case "Certificate Issued": return "PCC Issued";
     case "Rejected": return "PCC Rejected";
@@ -392,9 +401,18 @@ function stageTextClass(row) {
   // text (e.g. "ALREADY DL") -> neutral. Both override the PCC colour.
   if (row?.status === "Accepted" && row.services?.ll_dl_no_required !== false) {
     const lldl = String(row.ll_dl_no || "").trim();
-    if (lldl) return isManualLldlText(lldl) ? "text-slate-500 dark:text-slate-400" : "text-green-600 dark:text-green-400";
+    if (lldl) {
+      // LL RIC with a PCC: if the PCC isn't issued yet, colour by the PCC
+      // status (that's the part still needing attention).
+      if (pccNeeded(row) && isDraftedPccNo(row.pcc_no)) return DRAFTED_PCC_STYLE;
+      if (pccNeeded(row) && row.pcc_no && row.pcc_status !== "Certificate Issued" && PCC_STATUS_STYLES[row.pcc_status]) {
+        return PCC_STATUS_STYLES[row.pcc_status];
+      }
+      return isManualLldlText(lldl) ? "text-slate-500 dark:text-slate-400" : "text-green-600 dark:text-green-400";
+    }
   }
   if (!row || !pccNeeded(row) || !row.pcc_no) return "text-slate-400 dark:text-slate-500";
+  if (isDraftedPccNo(row.pcc_no)) return DRAFTED_PCC_STYLE;
   return PCC_STATUS_STYLES[row.pcc_status] || "text-slate-400 dark:text-slate-500";
 }
 // LL/DL No. normally holds a real number (e.g. "DL1/0168619/2026"). Staff
@@ -421,8 +439,10 @@ function getProcessingStage(row) {
   // Once the LL/DL No. has come back the application is done: a real number
   // -> "<Service> Issued" (e.g. "LL RIC Issued"); hand-typed text -> that
   // text itself (e.g. "ALREADY DL"). Applies whether or not PCC is needed.
+  // When the service also has a PCC No, show both: "LL RIC Issued & PCC Issued".
   if (lldlRequired && lldlNo) {
-    return isManualLldlText(lldlNo) ? lldlNo : `${serviceLabel(row.services)} Issued`;
+    const lldlLabel = isManualLldlText(lldlNo) ? lldlNo : `${serviceLabel(row.services)} Issued`;
+    return pccRequired && hasPccNo ? `${lldlLabel} & ${pccStageLabel(row.pcc_status, row.pcc_no)}` : lldlLabel;
   }
   // Application No. entered -> "Application No. generated"; once the fee is
   // paid -> "Application FEE PAID".
@@ -432,7 +452,7 @@ function getProcessingStage(row) {
   }
   // Once a PCC No exists, show where that PCC actually stands (same status
   // that colours the PCC No column) instead of always "Under Process".
-  const pccLabel = pccStageLabel(row.pcc_status);
+  const pccLabel = pccStageLabel(row.pcc_status, row.pcc_no);
   if (hasAppNo && hasPccNo) return `${appLabel} & ${pccLabel}`;
   if (hasAppNo && !hasPccNo) return `${appLabel} & PCC Pending`;
   if (!hasAppNo && hasPccNo) return pccLabel;
@@ -1071,13 +1091,15 @@ export default function Applications({ restricted = false, canEdit = true, canAp
 
   // Staff type the PCC No. in by hand (no auto-sync from the PCC portal).
   // Typing one in for the first time is treated as "PCC fee received" —
-  // it auto-fills the standard ₹350 PCC Fee if that field is still blank,
+  // it auto-fills the standard ₹350 PCC Fee if that field is still blank
+  // (only for a proper 12-digit No. — a drafted, longer one leaves it blank),
   // so the ledger/processing stage don't sit waiting on a separate fee
   // entry that's easy to forget.
   const updatePccFields = async (id, fields) => {
     const row = rows.find((r) => r.id === id);
     const payload = { ...fields };
-    if (fields.pcc_no && row && (row.pcc_fee === null || row.pcc_fee === undefined || row.pcc_fee === "")) {
+    // Drafted (too many digits) PCC No -> fee not paid yet, so no auto-fill.
+    if (fields.pcc_no && !isDraftedPccNo(fields.pcc_no) && row && (row.pcc_fee === null || row.pcc_fee === undefined || row.pcc_fee === "")) {
       payload.pcc_fee = 350;
     }
     const { error } = await supabase.from("applications").update(payload).eq("id", id);

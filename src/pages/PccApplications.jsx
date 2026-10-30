@@ -47,7 +47,7 @@ const SKIP_STATUSES = new Set(["Certificate Issued", "Police Case"]);
 //    (350) is paid; only this one can be tracked on the portal.
 function isDraftPcc(pccNo) {
   const digits = String(pccNo || "").replace(/^DLSB-PCC\//i, "").trim();
-  return /^\d{14}$/.test(digits);
+  return /^\d{13,}$/.test(digits);
 }
 
 const CERT_BUCKET = "application-documents";

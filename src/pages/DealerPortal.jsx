@@ -901,13 +901,18 @@ function getProcessingStage(row) {
   const lldlNo = String(row.ll_dl_no || "").trim();
   // Real LL/DL number -> "<Service> Issued"; hand-typed text with no digits
   // (e.g. "ALREADY DL") is shown as-is. Same rule as the admin side.
-  if (lldlRequired && lldlNo) return /\d/.test(lldlNo) ? `${serviceLabel(row.services)} Issued` : lldlNo;
+  if (lldlRequired && lldlNo) {
+    const lldlLabel = /\d/.test(lldlNo) ? `${serviceLabel(row.services)} Issued` : lldlNo;
+    const drafted = /^\d{13,}$/.test(String(row.pcc_no || "").replace(/^DLSB-PCC\//i, "").trim());
+    const pccLabel = drafted ? "PCC Drafted Fee Not Paid" : { "Certificate Issued": "PCC Issued", Rejected: "PCC Rejected", "Under Verification": "PCC Under Verification", "Police Case": "PCC Police Case" }[row.pcc_status] || "PCC Under Process";
+    return pccRequired && hasPccNo ? `${lldlLabel} & ${pccLabel}` : lldlLabel;
+  }
   if (!pccRequired) {
     return hasAppNo ? "Application No. generated" : "Awaiting Application No.";
   }
-  if (hasAppNo && hasPccNo) return "Application No. generated & PCC Under Process";
+  if (hasAppNo && hasPccNo) return "Application No. generated & " + (/^\d{13,}$/.test(String(row.pcc_no).replace(/^DLSB-PCC\//i, "").trim()) ? "PCC Drafted Fee Not Paid" : "PCC Under Process");
   if (hasAppNo && !hasPccNo) return "Application No. generated & PCC Pending";
-  if (!hasAppNo && hasPccNo) return "PCC Under Process";
+  if (!hasAppNo && hasPccNo) return /^\d{13,}$/.test(String(row.pcc_no).replace(/^DLSB-PCC\//i, "").trim()) ? "PCC Drafted Fee Not Paid" : "PCC Under Process";
   return "Awaiting Application No. & PCC";
 }
 
