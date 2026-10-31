@@ -11,7 +11,7 @@ import { Card, StatusBadge, GhostButton } from "../components/UI";
 import { fetchAllRows } from "../lib/fetchAll";
 import { todayIST } from "../lib/dates";
 import { SERVER_API_BASE } from "../lib/serverApi";
-import PCCStatusCheckModal, { normalizePccApplicationNumber, stripKinPrefix, persistPccStatus } from "../components/PCCStatusCheckModal";
+import PCCStatusCheckModal, { normalizePccApplicationNumber, stripKinPrefix, persistPccStatus, getPccRejectReason } from "../components/PCCStatusCheckModal";
 import * as XLSX from "xlsx";
 import { ArrowUp, ArrowDown, ArrowUpDown, RefreshCw, Pencil, Download, Loader2, Upload } from "lucide-react";
 import {
@@ -276,14 +276,14 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
       setLoading(true);
       setError("");
       const SELECT_COLS =
-        "id, draft_code, application_date, submitted_at, amount, status, applicant_name, father_husband_name, application_no, ll_dl_no, pcc_no, pcc_status, pcc_stage, pcc_certificate_path, pcc_not_required, rto_id, dealers(name,code,short_name), services(parent_service,short_name,pcc_required,ll_dl_no_required)";
+        "id, draft_code, application_date, submitted_at, amount, status, applicant_name, father_husband_name, application_no, ll_dl_no, pcc_no, pcc_status, pcc_stage, pcc_certificate_path, pcc_not_required, remarks, pcc_timeline, rto_id, dealers(name,code,short_name), services(parent_service,short_name,pcc_required,ll_dl_no_required)";
       const [{ data: rt }, res, withNo] = await Promise.all([
         supabase.from("rtos").select("id, name, code, type").order("name"),
         fetchAllRows(() =>
           supabase
             .from("applications")
             .select(
-              "id, draft_code, application_date, submitted_at, amount, status, applicant_name, father_husband_name, application_no, ll_dl_no, pcc_no, pcc_status, pcc_stage, pcc_certificate_path, pcc_not_required, rto_id, dealers(name,code,short_name), services!inner(parent_service,short_name,pcc_required,ll_dl_no_required)"
+              "id, draft_code, application_date, submitted_at, amount, status, applicant_name, father_husband_name, application_no, ll_dl_no, pcc_no, pcc_status, pcc_stage, pcc_certificate_path, pcc_not_required, remarks, pcc_timeline, rto_id, dealers(name,code,short_name), services!inner(parent_service,short_name,pcc_required,ll_dl_no_required)"
             )
             .eq("services.pcc_required", true)
             .order("submitted_at", { ascending: false })
@@ -808,6 +808,11 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
                           <StatusBadge status={r.status} />
                           {stage && <span className={`text-[11px] font-medium whitespace-nowrap ${stageTextClass(r)}`}>{stage}</span>}
                         </div>
+                        {getPccRejectReason(r) && (
+                          <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5 max-w-xs whitespace-normal">
+                            Reason: {getPccRejectReason(r)}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -833,6 +838,7 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
       {pccCheckRow && (
         <PCCStatusCheckModal
           row={pccCheckRow}
+          autoSearch
           onClose={() => setPccCheckRow(null)}
           onStatusSynced={(id, updates) =>
             setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...updates } : r)))

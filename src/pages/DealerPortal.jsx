@@ -28,7 +28,7 @@ import { useDarkMode } from "../lib/theme";
 import { Sun, Moon, Fingerprint, Download, Phone, ScanLine, ScanText, Gamepad2 } from "lucide-react";
 import SearchableSelect from "../components/SearchableSelect";
 import QrPaymentPanel from "../components/QrPaymentPanel";
-import PCCStatusCheckModal from "../components/PCCStatusCheckModal";
+import PCCStatusCheckModal, { getPccRejectReason, stripKinPrefix } from "../components/PCCStatusCheckModal";
 import ImageCropModal from "../components/ImageCropModal";
 import DealerBottomTabBar from "../components/DealerBottomTabBar";
 import DealerSidebar from "../components/DealerSidebar";
@@ -1612,18 +1612,94 @@ function DealerAppointments({ dealerId, identity, refreshKey, fromYear = new Dat
   );
 }
 
+// Drafted PCC numbers are 13+ digits — the Delhi Police portal can't track them.
+function isDraftPccNo(pccNo) {
+  return /^\d{13,}$/.test(String(pccNo || "").replace(/^DLSB-PCC\//i, "").trim());
+}
+
+const DEALER_PCC_FILTERS = [
+  { key: "", label: "All" },
+  { key: "__none__", label: "PCC Due" },
+  { key: "Under Verification", label: "Under Verification" },
+  { key: "Certificate Issued", label: "Certificate Issued" },
+  { key: "Rejected", label: "Rejected" },
+  { key: "Police Case", label: "Police Case" },
+  { key: "__draft__", label: "PCC Drafted" },
+];
+
+// Father name cell: shows the name, or an "+ Add father name" button when it's
+// missing so the dealer can fill it in (needed for the PCC portal search).
+function DealerFatherCell({ row, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const commit = async () => {
+    if (saving) return;
+    const next = stripKinPrefix(val).trim().toUpperCase();
+    if (!next || next === (row.father_husband_name || "")) { setEditing(false); return; }
+    setSaving(true);
+    try {
+      await onSave(row, next);
+      setEditing(false);
+    } catch (e) {
+      setErr(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div>
+        <input
+          autoFocus
+          value={val}
+          disabled={saving}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") { setVal(""); setEditing(false); }
+          }}
+          placeholder="Father name"
+          className="w-40 rounded border border-blue-400 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+        />
+        {err && <div className="text-[10px] text-rose-500 mt-0.5">{err}</div>}
+      </div>
+    );
+  }
+  if (!row.father_husband_name) {
+    return (
+      <button
+        onClick={() => { setVal(""); setErr(""); setEditing(true); }}
+        title="Add father name"
+        className="text-xs text-slate-400 dark:text-slate-500 hover:text-blue-500 border border-dashed border-slate-300 dark:border-slate-700 rounded px-2 py-0.5"
+      >
+        + Add father name
+      </button>
+    );
+  }
+  return <span>{row.father_husband_name}</span>;
+}
+
 function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFullYear() }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("");
+  // Clicking a PCC No opens the Track Application popup and searches at once.
+  const [pccCheckRow, setPccCheckRow] = useState(null);
+  const [notice, setNotice] = useState(null);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       const { data, error } = await supabase
         .from("applications")
-        .select("id, draft_code, application_no, applicant_name, submitted_at, pcc_no, pcc_status, pcc_certificate_path, services(parent_service, short_name, pcc_required)")
+        .select("id, draft_code, application_no, applicant_name, father_husband_name, submitted_at, pcc_no, pcc_status, pcc_timeline, pcc_certificate_path, pcc_not_required, remarks, services(parent_service, short_name, pcc_required)")
         .eq("dealer_id", dealerId)
         .order("submitted_at", { ascending: false });
       if (error) {
@@ -1642,29 +1718,79 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
     // lands while the dealer's on this tab.
   }, [dealerId, refreshKey]);
 
-  const q = search.trim().toLowerCase();
   const yearScopedRows = rows.filter((r) => inVisibleYears(r.submitted_at, fromYear));
-  const visibleRows = !q ? yearScopedRows : yearScopedRows.filter((r) =>
-    [r.applicant_name, r.pcc_no, r.application_no, r.draft_code].some((v) => (v || "").toLowerCase().includes(q))
-  );
+
+  const matchesFilter = (r, key) => {
+    if (key === "") return true;
+    if (key === "__none__") return !r.pcc_no && !r.pcc_not_required;
+    if (key === "__draft__") return isDraftPccNo(r.pcc_no);
+    return !!r.pcc_no && r.pcc_status === key;
+  };
+  const countFor = (key) => yearScopedRows.filter((r) => matchesFilter(r, key)).length;
+
+  const q = search.trim().toLowerCase();
+  const visibleRows = yearScopedRows.filter((r) => {
+    if (!matchesFilter(r, filter)) return false;
+    if (!q) return true;
+    return [r.applicant_name, r.father_husband_name, r.pcc_no, r.application_no, r.draft_code]
+      .some((v) => (v || "").toLowerCase().includes(q));
+  });
+
+  const saveFatherName = async (row, name) => {
+    const { error } = await supabase.from("applications").update({ father_husband_name: name }).eq("id", row.id);
+    if (error) throw error;
+    setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, father_husband_name: name } : r)));
+  };
+
+  const openPccCheck = (row) => {
+    if (isDraftPccNo(row.pcc_no)) {
+      setNotice(`${row.applicant_name || row.draft_code} (${row.pcc_no}): this is a drafted PCC number — fee not paid yet, so it can't be tracked on the portal.`);
+      return;
+    }
+    setNotice(null);
+    setPccCheckRow(row);
+  };
 
   return (
     <Card title="PCC Status">
+      <div className="flex flex-wrap gap-2 mb-3">
+        {DEALER_PCC_FILTERS.map((f) => {
+          const active = filter === f.key;
+          return (
+            <button
+              key={f.key || "all"}
+              onClick={() => setFilter(f.key)}
+              className={`px-3 py-1 rounded-full text-xs font-semibold border whitespace-nowrap transition-colors ${
+                active
+                  ? "bg-blue-600 border-blue-600 text-white"
+                  : "bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-blue-400"
+              }`}
+            >
+              {f.label} <span className={active ? "text-blue-100" : "text-slate-400 dark:text-slate-500"}>{countFor(f.key)}</span>
+            </button>
+          );
+        })}
+      </div>
       <div className="relative mb-3 max-w-sm">
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search name, PCC no, application no…"
+          placeholder="Search name, father name, PCC no, application no…"
           className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
         />
       </div>
+      {notice && (
+        <div className="mb-3 text-xs rounded-lg border border-amber-300 bg-amber-50 text-amber-800 px-3 py-2">{notice}</div>
+      )}
       {loading ? (
         <p className="text-slate-400 dark:text-slate-500 text-sm">Loading…</p>
       ) : loadError ? (
         <p className="text-center text-rose-600 py-8">Couldn't load PCC status — please refresh and try again.</p>
       ) : visibleRows.length === 0 ? (
-        <p className="text-center text-slate-400 dark:text-slate-500 py-8">No PCC-requiring applications yet</p>
+        <p className="text-center text-slate-400 dark:text-slate-500 py-8">
+          {yearScopedRows.length === 0 ? "No PCC-requiring applications yet" : "No applications in this view"}
+        </p>
       ) : (
         <div className="dealer-scroll-x w-full min-w-0">
           <table className="scroll-table min-w-full text-sm border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
@@ -1672,57 +1798,82 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
               <tr>
                 <th className="text-left font-medium px-3 py-2">Date</th>
                 <th className="text-left font-medium px-3 py-2">Applicant</th>
+                <th className="text-left font-medium px-3 py-2">Father Name</th>
                 <th className="text-left font-medium px-3 py-2">Service</th>
                 <th className="text-left font-medium px-3 py-2">PCC No</th>
                 <th className="text-left font-medium px-3 py-2">Status</th>
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map((r) => (
-                <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
-                  <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">
-                    {r.submitted_at ? fmtDate(r.submitted_at) : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">{r.applicant_name || "—"}</td>
-                  <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">
-                    {r.services?.short_name || r.services?.parent_service || "—"}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    {r.pcc_no ? (
-                      r.pcc_certificate_path ? (
-                        <a
-                          href={supabase.storage.from("application-documents").getPublicUrl(r.pcc_certificate_path).data.publicUrl}
-                          download
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="Download PCC certificate"
-                          className="font-semibold text-emerald-600 dark:text-emerald-400 hover:underline"
-                        >
-                          {r.pcc_no}
-                        </a>
-                      ) : r.pcc_status === "Rejected" ? (
-                        <span className="font-semibold text-rose-600 dark:text-rose-400">{r.pcc_no}</span>
+              {visibleRows.map((r) => {
+                const reason = getPccRejectReason(r);
+                const pccColor = r.pcc_certificate_path
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : r.pcc_status === "Rejected"
+                    ? "text-rose-600 dark:text-rose-400"
+                    : "text-yellow-700 dark:text-yellow-500";
+                return (
+                  <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
+                    <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">
+                      {r.submitted_at ? fmtDate(r.submitted_at) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">{r.applicant_name || "—"}</td>
+                    <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                      <DealerFatherCell row={r} onSave={saveFatherName} />
+                    </td>
+                    <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                      {r.services?.short_name || r.services?.parent_service || "—"}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {r.pcc_no ? (
+                        <>
+                          <button
+                            onClick={() => openPccCheck(r)}
+                            title="Click to track this application"
+                            className={`font-semibold hover:underline ${pccColor}`}
+                          >
+                            {r.pcc_no}
+                          </button>
+                          {isDraftPccNo(r.pcc_no) && (
+                            <span className="ml-1.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-[10px] font-semibold px-1.5 py-0.5">Drafted</span>
+                          )}
+                        </>
                       ) : (
-                        <span className="font-semibold text-yellow-700 dark:text-yellow-500">{r.pcc_no}</span>
-                      )
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    {r.pcc_status ? (
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${PCC_STATUS_STYLES[r.pcc_status] || "bg-slate-50 text-slate-500 border-slate-300"}`}>
-                        {r.pcc_status}
-                      </span>
-                    ) : (
-                      <span className="text-slate-300 text-xs">—</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                        "—"
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {r.pcc_status ? (
+                        <div>
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border whitespace-nowrap ${PCC_STATUS_STYLES[r.pcc_status] || "bg-slate-50 text-slate-500 border-slate-300"}`}>
+                            {r.pcc_status}
+                          </span>
+                          {reason && (
+                            <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-1 max-w-xs whitespace-normal">
+                              Reason: {reason}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-slate-300 text-xs">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
+      )}
+      {pccCheckRow && (
+        <PCCStatusCheckModal
+          row={pccCheckRow}
+          autoSearch
+          onClose={() => setPccCheckRow(null)}
+          onStatusSynced={(id, updates) =>
+            setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...updates } : r)))
+          }
+        />
       )}
     </Card>
   );

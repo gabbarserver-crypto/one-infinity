@@ -102,6 +102,21 @@ function buildRejectionRemark(status, existingRemarks) {
   return existingRemarks ? `${existingRemarks}\n${line}` : line;
 }
 
+// Rejection reason for a row, for the status columns. Prefers the line saved
+// in remarks ("PCC Rejected (14 Jun 2026): <reason>"), falls back to the stored
+// portal timeline. Returns "" when the row isn't Rejected or has no reason.
+export function getPccRejectReason(row) {
+  if (!row || row.pcc_status !== "Rejected") return "";
+  const lines = String(row.remarks || "").split(/\r?\n/).filter((l) => /^PCC Rejected/i.test(l.trim()));
+  if (lines.length) {
+    const last = lines[lines.length - 1].trim();
+    return (last.replace(/^PCC Rejected(\s*\([^)]*\))?\s*:\s*/i, "") || last).trim();
+  }
+  const entry = [...(row.pcc_timeline || [])].reverse().find((t) => t.stage === "Rejected");
+  const text = String(entry?.description || "").trim();
+  return (text.match(/Reason:\s*(.*)$/is)?.[1] || text).trim();
+}
+
 // Saves what the portal just told us onto the application row, so the status
 // dropdown / stepper update right away instead of waiting for the cron sync.
 // Same mapping as api/_lib/pccClient.js (mapStageToDropdownStatus). Rejected /
@@ -148,7 +163,7 @@ async function persistGuardianName(row, guardianName) {
   return data?.length ? name : null;
 }
 
-export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, onStatusSynced }) {
+export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, onStatusSynced, autoSearch = false }) {
   const [applicationNumber, setApplicationNumber] = useState(
     normalizePccApplicationNumber(row.pcc_no)?.replace(/^DLSB-PCC\//i, "") || ""
   );
@@ -233,6 +248,13 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
       setLoading(false);
     }
   };
+
+  // Opened by clicking a PCC No: run the search straight away so the status
+  // shows up without pressing "Search Application". Needs an application number.
+  useEffect(() => {
+    if (autoSearch && applicationNumber.trim()) runCheck();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // The certificate link's token appears to be short-lived, so instead of
   // reusing whatever certificateUrl came back from the earlier search, we
