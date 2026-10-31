@@ -924,6 +924,13 @@ function dealerFromYear(dealer) {
   if (v === null || v === undefined) return new Date().getFullYear();
   return Number(v) || 0;
 }
+// The date shown for an application everywhere in the dealer portal — same as
+// the admin side: the application's own date when set, otherwise the day it
+// was submitted/uploaded.
+function rowDate(r) {
+  return r.application_date || r.submitted_at;
+}
+
 function inVisibleYears(dateStr, fromYear) {
   if (!fromYear) return true; // 0 = all time
   if (!dateStr) return false;
@@ -1240,7 +1247,7 @@ function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, 
     setLoading(true);
     const { data, error } = await supabase
       .from("applications")
-      .select("id, draft_code, application_no, applicant_name, father_husband_name, date_of_birth, mobile, address, status, submitted_at, service_id, dealer_id, completed_at, source_application_id, ll_dl_no, pcc_no, pcc_status, pcc_stage, pcc_timeline, pcc_certificate_path, pcc_last_synced_at, pcc_not_required, service_answers, services(parent_service, short_name, chat_in_app, next_service_id, next_service_wait_days, pcc_required, ll_dl_no_required)")
+      .select("id, draft_code, application_date, application_no, applicant_name, father_husband_name, date_of_birth, mobile, address, status, submitted_at, service_id, dealer_id, completed_at, source_application_id, ll_dl_no, pcc_no, pcc_status, pcc_stage, pcc_timeline, pcc_certificate_path, pcc_last_synced_at, pcc_not_required, service_answers, services(parent_service, short_name, chat_in_app, next_service_id, next_service_wait_days, pcc_required, ll_dl_no_required)")
       .eq("dealer_id", dealerId)
       .order("submitted_at", { ascending: false });
     if (error) {
@@ -1314,7 +1321,7 @@ function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, 
   useEffect(() => { load(); }, [load, refreshKey]);
 
   // How many years of history to show is set per dealer by the admin.
-  const yearScopedRows = rows.filter((r) => inVisibleYears(r.submitted_at, fromYear));
+  const yearScopedRows = rows.filter((r) => inVisibleYears(rowDate(r), fromYear));
   const draftCount = yearScopedRows.filter((r) => DEALER_STATUS_GROUPS.Draft(r)).length;
   const statusFiltered = statusFilter === "All" ? yearScopedRows : yearScopedRows.filter((r) => DEALER_STATUS_GROUPS[statusFilter](r));
   const q = search.trim().toLowerCase();
@@ -1326,7 +1333,7 @@ function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, 
     ref: (r) => r.application_no || r.draft_code || "",
     applicant: (r) => r.applicant_name || "",
     service: (r) => r.services?.short_name || r.services?.parent_service || "",
-    submitted_at: (r) => (r.submitted_at ? new Date(r.submitted_at).getTime() : 0),
+    submitted_at: (r) => (rowDate(r) ? new Date(rowDate(r)).getTime() : 0),
     status: (r) => r.status || "",
   };
   const sortedRows = [...visibleRows].sort((a, b) => {
@@ -1377,7 +1384,7 @@ function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, 
             <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-500">
               <tr>
                 <SortableTh label="Ref No." sortKeyName="ref" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                <SortableTh label="Submitted" sortKeyName="submitted_at" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh label="Date" sortKeyName="submitted_at" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Service" sortKeyName="service" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Applicant" sortKeyName="applicant" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 <th className="text-left font-medium px-3 py-2">LL No</th>
@@ -1399,7 +1406,7 @@ function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, 
                       {r.application_no || r.draft_code}
                     </button>
                   </td>
-                  <td className="px-3 py-2 text-slate-500 dark:text-slate-500">{r.submitted_at ? fmtDate(r.submitted_at) : "—"}</td>
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-500">{rowDate(r) ? fmtDate(rowDate(r)) : "—"}</td>
                   <td className="px-3 py-2 text-slate-700 dark:text-slate-300">
                     {r.services?.short_name || r.services?.parent_service || "—"}
                   </td>
@@ -1546,7 +1553,7 @@ function DealerAppointments({ dealerId, identity, refreshKey, fromYear = new Dat
     setLoading(true);
     const { data, error } = await supabase
       .from("applications")
-      .select("id, draft_code, application_no, applicant_name, father_husband_name, date_of_birth, mobile, address, status, submitted_at, service_id, dealer_id, completed_at, source_application_id, ll_dl_no, pcc_no, pcc_status, service_answers, services(parent_service, short_name, next_service_id, next_service_wait_days, pcc_required, ll_dl_no_required)")
+      .select("id, draft_code, application_date, application_no, applicant_name, father_husband_name, date_of_birth, mobile, address, status, submitted_at, service_id, dealer_id, completed_at, source_application_id, ll_dl_no, pcc_no, pcc_status, service_answers, services(parent_service, short_name, next_service_id, next_service_wait_days, pcc_required, ll_dl_no_required)")
       .eq("dealer_id", dealerId)
       .order("submitted_at", { ascending: false });
     if (error) {
@@ -1562,7 +1569,7 @@ function DealerAppointments({ dealerId, identity, refreshKey, fromYear = new Dat
   useEffect(() => { load(); }, [load, refreshKey]);
 
   const convertedSourceIds = new Set(rows.map((r) => r.source_application_id).filter(Boolean));
-  const eligibleRows = rows.filter((r) => isEligibleForAppointment(r, convertedSourceIds) && inVisibleYears(r.submitted_at, fromYear));
+  const eligibleRows = rows.filter((r) => isEligibleForAppointment(r, convertedSourceIds) && inVisibleYears(rowDate(r), fromYear));
 
   const bookAppointment = async (payload) => {
     const { data: newApp, error } = await supabase
@@ -1764,7 +1771,7 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
       setLoading(true);
       const { data, error } = await supabase
         .from("applications")
-        .select("id, draft_code, application_no, applicant_name, father_husband_name, submitted_at, pcc_no, pcc_status, pcc_timeline, pcc_certificate_path, pcc_not_required, remarks, services(parent_service, short_name, pcc_required)")
+        .select("id, draft_code, application_date, application_no, applicant_name, father_husband_name, submitted_at, pcc_no, pcc_status, pcc_timeline, pcc_certificate_path, pcc_not_required, remarks, services(parent_service, short_name, pcc_required)")
         .eq("dealer_id", dealerId)
         .order("submitted_at", { ascending: false });
       if (error) {
@@ -1783,7 +1790,12 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
     // lands while the dealer's on this tab.
   }, [dealerId, refreshKey]);
 
-  const yearScopedRows = rows.filter((r) => inVisibleYears(r.submitted_at, fromYear));
+  // Same date the admin PCC page shows: the application's own date when set,
+  // otherwise the day it was submitted. Newest first.
+  const dateOf = rowDate;
+  const yearScopedRows = rows
+    .filter((r) => inVisibleYears(dateOf(r), fromYear))
+    .sort((x, y) => String(dateOf(y) || "").localeCompare(String(dateOf(x) || "")));
 
   const matchesFilter = (r, key) => {
     if (key === "") return true;
@@ -1880,12 +1892,12 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
                 return (
                   <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
                     <td className="hidden sm:table-cell px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">
-                      {r.submitted_at ? fmtDate(r.submitted_at) : "—"}
+                      {dateOf(r) ? fmtDate(dateOf(r)) : "—"}
                     </td>
                     <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">
                       {r.applicant_name || "—"}
                       <div className="sm:hidden text-[11px] text-slate-400 dark:text-slate-500">
-                        {r.submitted_at ? fmtDate(r.submitted_at) : "—"}
+                        {dateOf(r) ? fmtDate(dateOf(r)) : "—"}
                         {" · "}
                         {r.services?.short_name || r.services?.parent_service || "—"}
                       </div>
@@ -2548,7 +2560,7 @@ function DealerServiceAmounts({ dealerId, fromYear = new Date().getFullYear() })
       setLoading(true);
       const { data, error } = await supabase
         .from("applications")
-        .select("id, draft_code, applicant_name, mobile, amount, submitted_at, status, services(parent_service, short_name)")
+        .select("id, draft_code, application_date, applicant_name, mobile, amount, submitted_at, status, services(parent_service, short_name)")
         .eq("dealer_id", dealerId)
         .order("submitted_at", { ascending: false });
       if (error) {
@@ -2564,8 +2576,8 @@ function DealerServiceAmounts({ dealerId, fromYear = new Date().getFullYear() })
   }, [dealerId]);
 
   const filteredRows = rows.filter((r) => {
-    if (!inVisibleYears(r.submitted_at, fromYear)) return false;
-    const d = r.submitted_at?.slice(0, 10);
+    if (!inVisibleYears(rowDate(r), fromYear)) return false;
+    const d = rowDate(r)?.slice(0, 10);
     if (rangeFrom && d < rangeFrom) return false;
     if (rangeTo && d > rangeTo) return false;
     if (query.trim()) {
@@ -2634,7 +2646,7 @@ function DealerServiceAmounts({ dealerId, fromYear = new Date().getFullYear() })
               {filteredRows.map((r) => (
                 <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
                   <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">
-                    {r.submitted_at ? fmtDate(r.submitted_at) : "—"}
+                    {rowDate(r) ? fmtDate(rowDate(r)) : "—"}
                   </td>
                   <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{r.draft_code}</td>
                   <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">{r.applicant_name}</td>
