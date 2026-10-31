@@ -40,6 +40,7 @@ import PrivacyPolicy from "./pages/legal/PrivacyPolicy";
 import TermsAndConditions from "./pages/legal/TermsAndConditions";
 import RefundPolicy from "./pages/legal/RefundPolicy";
 import ContactUs from "./pages/legal/ContactUs";
+import { handleBack } from "./lib/backStack";
 
 // Public, unauthenticated routes — reachable with no login and no session,
 // on purpose. This is what payment-gateway KYC verification (Cashfree etc.)
@@ -468,6 +469,8 @@ export default function App() {
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     const sub = CapacitorApp.addListener("backButton", () => {
+      // Open popups / the dealer portal's tab stack get first say.
+      if (handleBack()) return;
       if (commsWindowRef.current?.isOpen?.()) {
         commsWindowRef.current.close();
         return;

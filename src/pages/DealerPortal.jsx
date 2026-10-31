@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useState, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { Card, StatusBadge, Modal, Field, Input, Select, PrimaryButton, GhostButton, Toast } from "../components/UI";
 import { usePersistedState, DEALER_TAB_KEY } from "../lib/persist";
+import { setBackFallback, handleBack } from "../lib/backStack";
 import { usePushThreadOpen, requestOpenThread } from "../lib/pushNav";
 import { postApplicationNotice, isDraftNoticeText } from "../lib/draftChat";
 import CommsWindow from "../components/CommsWindow";
@@ -82,6 +83,15 @@ const openGames = async () => {
 // / Payments), so the bottom nav / sidebar only need to list "Ledger".
 const TABS = ["Applications", "Appointment", "PCC Status", "Call/Chat", "Ledger"];
 const LEDGER_SUBTABS = ["My Ledger", "Service", "Payments"];
+// Shown in the mobile top bar for whichever tab is selected.
+const MOBILE_TAB_TITLES = {
+  Applications: "MY APPLICATION",
+  Appointment: "APPOINTMENT",
+  "PCC Status": "PCC STATUS",
+  Ledger: "MY LEDGER",
+  "Call/Chat": "CALL / CHAT",
+  Staff: "STAFF",
+};
 
 // Small reusable sortable <th> — click toggles asc/desc on that column,
 // clicking a different column switches to it (asc first). Shared by the
@@ -253,6 +263,32 @@ export default function DealerPortal({ dealer, identity, call, onLogout, pushTar
   // for a dealer_staff sub-login, matching where those cards have always
   // lived for staff logins.
   const isDealerOwner = identity?.type === "dealer";
+
+  // Back button: close whatever is open first (popups close themselves via
+  // lib/backStack), then step from any tab back to the first one (Dashboard),
+  // and only after that let Back leave the app.
+  const backRef = useRef(null);
+  backRef.current = () => {
+    if (commsRef.current?.isOpen?.()) { commsRef.current.close(); return true; }
+    if (chatApp) { setChatApp(null); return true; }
+    if (tab !== visibleTabs[0]) { setTab(visibleTabs[0]); return true; }
+    return false;
+  };
+  useEffect(() => {
+    const unregister = setBackFallback(() => backRef.current?.());
+    // Browser/PWA Back (the native app uses its own listener in App.jsx):
+    // keep one history entry in reserve so Back can be intercepted.
+    const native = Capacitor.isNativePlatform();
+    if (!native) window.history.pushState({ dealerPortal: true }, "");
+    const onPop = () => {
+      if (handleBack()) window.history.pushState({ dealerPortal: true }, "");
+    };
+    if (!native) window.addEventListener("popstate", onPop);
+    return () => {
+      unregister();
+      if (!native) window.removeEventListener("popstate", onPop);
+    };
+  }, []);
   const [dark, toggleDark] = useDarkMode();
   const [passkeyMsg, setPasskeyMsg] = useState("");
   const [photoUrl, setPhotoUrl] = useState(null);
@@ -366,9 +402,9 @@ export default function DealerPortal({ dealer, identity, call, onLogout, pushTar
             </span>
           </button>
           <div className="min-w-0 flex-1">
-            <p className="font-bold text-lg truncate">{dealer.name}</p>
+            <p className="font-bold text-lg truncate">{tab === "Dashboard" ? dealer.name : (MOBILE_TAB_TITLES[tab] || tab)}</p>
             <p className="text-slate-300 text-xs truncate">
-              Code {dealer.code}
+              {tab === "Dashboard" ? "" : `${dealer.name} · `}Code {dealer.code}
               {identity?.type === "dealer_staff" ? ` · ${identity.name}` : (dealer.contact_name ? ` · ${dealer.contact_name}` : "")}
             </p>
           </div>
@@ -423,7 +459,7 @@ export default function DealerPortal({ dealer, identity, call, onLogout, pushTar
       )}
 
       <main className="flex-1 w-full min-w-0 max-w-[1700px] mx-auto box-border p-6 pb-24 md:pb-8">
-        {(tab === "Ledger" || (tab === "Applications" && !isDealerOwner) || (tab === "Dashboard" && isDealerOwner)) && (
+        {tab === "Dashboard" && (
           <div className="w-full min-w-0 grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-4 mb-6">
             <div className="min-w-0 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-2.5 sm:p-5">
               <h3 className="text-[10px] sm:text-base font-semibold text-slate-800 dark:text-slate-100 mb-0.5 sm:mb-4 truncate">Running Balance</h3>
@@ -446,16 +482,18 @@ export default function DealerPortal({ dealer, identity, call, onLogout, pushTar
           </div>
         )}
 
+        {(tab === "Applications" || (tab === "Dashboard" && fromYear > 0)) && (
         <div className="w-full min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
           {tab === "Applications" && (
             <PrimaryButton onClick={() => setShowNew(true)} className="w-full sm:w-auto min-w-0 justify-center whitespace-nowrap">+ New Application</PrimaryButton>
           )}
-          {fromYear > 0 && ["Applications", "Appointment", "PCC Status", "Ledger"].includes(tab) && (
+          {fromYear > 0 && tab === "Dashboard" && (
             <span className="sm:ml-auto text-xs font-medium px-2 py-0.5 rounded-full border bg-slate-50 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700">
               {fromYear === new Date().getFullYear() ? `${fromYear} data only` : `Data from ${fromYear}`}
             </span>
           )}
         </div>
+        )}
 
         {tab === "Dashboard" && <DealerTeamDashboard dealerId={dealer.id} refreshKey={refreshKey} fromYear={fromYear} />}
         {tab === "Applications" && (
@@ -1819,7 +1857,7 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
                 <th className="hidden sm:table-cell text-left font-medium px-3 py-2">Date</th>
                 <th className="text-left font-medium px-3 py-2">Applicant</th>
                 <th className="hidden sm:table-cell text-left font-medium px-3 py-2">Father Name</th>
-                <th className="text-left font-medium px-3 py-2">Service</th>
+                <th className="hidden sm:table-cell text-left font-medium px-3 py-2">Service</th>
                 <th className="text-left font-medium px-3 py-2">PCC No</th>
                 <th className="text-left font-medium px-3 py-2">Status</th>
               </tr>
@@ -1841,12 +1879,14 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
                       {r.applicant_name || "—"}
                       <div className="sm:hidden text-[11px] text-slate-400 dark:text-slate-500">
                         {r.submitted_at ? fmtDate(r.submitted_at) : "—"}
+                        {" · "}
+                        {r.services?.short_name || r.services?.parent_service || "—"}
                       </div>
                     </td>
                     <td className="hidden sm:table-cell px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">
                       <DealerFatherCell row={r} onSave={saveFatherName} />
                     </td>
-                    <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                    <td className="hidden sm:table-cell px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">
                       {r.services?.short_name || r.services?.parent_service || "—"}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">

@@ -1,6 +1,7 @@
 // src/components/UI.jsx
 import React from "react";
 import { Pause, CheckCircle2, FileX, FileText, FileQuestion } from "lucide-react";
+import { pushBack } from "../lib/backStack";
 
 export const colors = {
   navy: "#0f1b3d",
@@ -165,6 +166,10 @@ export function Select({ children, ...props }) {
 }
 
 export function Modal({ title, onClose, children, wide, size }) {
+  // Android/browser Back closes the topmost open popup first (see lib/backStack).
+  const onCloseRef = React.useRef(onClose);
+  onCloseRef.current = onClose;
+  React.useEffect(() => pushBack(() => onCloseRef.current?.()), []);
   const width = size === "md" ? "max-w-2xl" : size === "xl" ? "max-w-7xl" : wide || size === "wide" ? "max-w-3xl" : "max-w-lg";
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
