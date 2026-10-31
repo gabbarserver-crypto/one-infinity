@@ -1218,6 +1218,35 @@ const PCC_STATUS_STYLES = {
   "Police Case": "bg-orange-50 text-orange-700 border-orange-300",
 };
 
+// LL No / PCC No cells (same colours + links as the desktop table), reused by
+// the compact two-line mobile rows in My Application.
+function DealerLlNo({ r }) {
+  if (!r.ll_dl_no) return <span className="text-slate-300">—</span>;
+  return r.learning_file_url ? (
+    <a href={r.learning_file_url} target="_blank" rel="noopener noreferrer" title="Download the uploaded Learning License copy" className="text-blue-600 font-semibold hover:underline">
+      {r.ll_dl_no}
+    </a>
+  ) : (
+    <span className="text-orange-500 font-semibold" title="Learning License copy not uploaded yet">{r.ll_dl_no}</span>
+  );
+}
+function DealerPccNo({ r }) {
+  if (!r.services?.pcc_required || !r.pcc_no) return <span className="text-slate-300">—</span>;
+  return r.pcc_certificate_path || r.pcc_doc_file_url ? (
+    <a
+      href={r.pcc_certificate_path ? supabase.storage.from("application-documents").getPublicUrl(r.pcc_certificate_path).data.publicUrl : r.pcc_doc_file_url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Download the PCC certificate"
+      className="text-blue-600 font-semibold hover:underline"
+    >
+      {r.pcc_no}
+    </a>
+  ) : (
+    <span className="text-orange-500 font-semibold" title="PCC certificate not uploaded yet">{r.pcc_no}</span>
+  );
+}
+
 function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, fromYear = new Date().getFullYear() }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1380,7 +1409,59 @@ function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, 
         <p className="text-slate-400 dark:text-slate-500 text-sm">Loading…</p>
       ) : (
         <div className="dealer-scroll-x w-full min-w-0">
-          <table className="scroll-table w-max min-w-full text-sm">
+          <table className="sm:hidden w-full text-xs">
+            <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-500">
+              <tr>
+                <SortableTh label="Applicant" sortKeyName="applicant" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh label="Date / Ref" sortKeyName="submitted_at" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <th className="text-left font-medium px-3 py-2 whitespace-nowrap">LL / PCC</th>
+                <SortableTh label="Mobile / Status" sortKeyName="status" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              </tr>
+            </thead>
+            <tbody>
+              {sortedRows.map((r) => (
+                <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800 align-top">
+                  <td className="px-3 py-2">
+                    <button onClick={() => onSelect?.(r)} className="text-blue-600 font-semibold text-left">
+                      {r.applicant_name}
+                    </button>
+                    <div className="text-slate-500 dark:text-slate-400">
+                      {r.services?.short_name || r.services?.parent_service || "—"}
+                      {r.services?.chat_in_app && (
+                        <button
+                          onClick={() => onChat?.({ id: r.id, draft_code: r.application_no || r.draft_code, applicant_name: r.applicant_name })}
+                          className="ml-2 text-blue-600 font-semibold"
+                        >
+                          Chat
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <div className="text-slate-600 dark:text-slate-300">{rowDate(r) ? fmtDate(rowDate(r)) : "—"}</div>
+                    <button onClick={() => setDetailsApp(r)} className="text-slate-500 dark:text-slate-400 text-left">
+                      {r.application_no || r.draft_code}
+                    </button>
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <div><DealerLlNo r={r} /></div>
+                    <div><DealerPccNo r={r} /></div>
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <div className="text-slate-600 dark:text-slate-300">{r.mobile || "—"}</div>
+                    <div className="mt-0.5"><StatusBadge status={r.status} /></div>
+                    {getProcessingStage(r) && (
+                      <div className="text-[10px] text-slate-400 dark:text-slate-500 leading-tight mt-0.5">{getProcessingStage(r)}</div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {visibleRows.length === 0 && (
+                <tr><td colSpan={4} className="text-center text-slate-400 dark:text-slate-500 py-8">No applications in this view</td></tr>
+              )}
+            </tbody>
+          </table>
+          <table className="hidden sm:table scroll-table w-max min-w-full text-sm">
             <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-500">
               <tr>
                 <SortableTh label="Ref No." sortKeyName="ref" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
