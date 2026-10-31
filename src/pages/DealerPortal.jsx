@@ -1664,6 +1664,18 @@ function DealerAppointments({ dealerId, identity, refreshKey, fromYear = new Dat
   );
 }
 
+// Same helpers the admin PCC page uses to decide which applications are
+// "RTO = PCC" (copied here so the dealer bundle doesn't pull in the admin page).
+function isCvrService(service) {
+  const label = String(service?.short_name || service?.parent_service || "").trim().toLowerCase();
+  return label === "cvr" || label === "cvr a";
+}
+function isPccServiceRow(service) {
+  const short = (service?.short_name || "").trim().toLowerCase();
+  const full = (service?.parent_service || "").trim().toLowerCase();
+  return short === "pcc" || full === "pcc" || full === "police character certificate";
+}
+
 // Drafted PCC numbers are 13+ digits — the Delhi Police portal can't track them.
 function isDraftPccNo(pccNo) {
   return /^\d{13,}$/.test(String(pccNo || "").replace(/^DLSB-PCC\//i, "").trim());
@@ -1769,11 +1781,14 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const { data, error } = await supabase
-        .from("applications")
-        .select("id, draft_code, application_date, application_no, applicant_name, father_husband_name, submitted_at, pcc_no, pcc_status, pcc_timeline, pcc_certificate_path, pcc_not_required, remarks, services(parent_service, short_name, pcc_required)")
-        .eq("dealer_id", dealerId)
-        .order("submitted_at", { ascending: false });
+      const [{ data, error }, { data: rtoData, error: rtoError }] = await Promise.all([
+        supabase
+          .from("applications")
+          .select("id, draft_code, application_date, application_no, applicant_name, father_husband_name, submitted_at, pcc_no, pcc_status, pcc_timeline, pcc_certificate_path, pcc_not_required, remarks, rto_id, services(parent_service, short_name, pcc_required)")
+          .eq("dealer_id", dealerId)
+          .order("submitted_at", { ascending: false }),
+        supabase.from("rtos").select("id, name"),
+      ]);
       if (error) {
         console.error("Couldn't load PCC status:", error.message);
         setLoadError(error.message);
@@ -1781,7 +1796,19 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
         return;
       }
       setLoadError(null);
-      setRows((data || []).filter((r) => r.services?.pcc_required));
+      // Only applications whose RTO is PCC belong here — same rule as the
+      // admin PCC page. If the RTO list can't be read, don't hide anything
+      // that has an RTO set (better to over-show than lose rows).
+      const rtoNames = new Map((rtoData || []).map((x) => [x.id, String(x.name || "").trim().toLowerCase()]));
+      const rtoIsPcc = (r) => (rtoError || !rtoNames.size ? true : (rtoNames.get(r.rto_id) || "").includes("pcc"));
+      setRows((data || []).filter((r) => {
+        const needed = pccNeeded(r);
+        const hasPccNo = !!String(r.pcc_no || "").trim();
+        const cvr = isCvrService(r.services);
+        if (needed && !hasPccNo && !cvr) return true; // PCC due, whatever the RTO
+        if (hasPccNo && r.rto_id && rtoIsPcc(r)) return true;
+        return needed && !cvr && (!r.rto_id || rtoIsPcc(r)) && (isPccServiceRow(r.services) || !!r.rto_id);
+      }));
       setLoading(false);
     })();
     // refreshKey bumps after a QR payment or new application, matching the
