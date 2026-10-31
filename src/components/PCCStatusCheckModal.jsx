@@ -163,7 +163,7 @@ async function persistGuardianName(row, guardianName) {
   return data?.length ? name : null;
 }
 
-export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, onStatusSynced, autoSearch = false }) {
+export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, onStatusSynced, autoSearch = false, requireGuardian = false }) {
   const [applicationNumber, setApplicationNumber] = useState(
     normalizePccApplicationNumber(row.pcc_no)?.replace(/^DLSB-PCC\//i, "") || ""
   );
@@ -207,7 +207,15 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
     }
   };
 
+  // With requireGuardian, the Father / Guardian name must be filled in before
+  // the portal is searched (the portal matches on it).
+  const needsGuardian = requireGuardian && !stripKinPrefix(guardianName || "")?.trim();
+
   const runCheck = async () => {
+    if (needsGuardian) {
+      setError("Pehle Father Name daalein, phir Search Application dabayein.");
+      return null;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -252,7 +260,7 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
   // Opened by clicking a PCC No: run the search straight away so the status
   // shows up without pressing "Search Application". Needs an application number.
   useEffect(() => {
-    if (autoSearch && applicationNumber.trim()) runCheck();
+    if (autoSearch && applicationNumber.trim() && !needsGuardian) runCheck();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -321,12 +329,18 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
           <Field label="Applicant Name">
             <Input value={applicantName} onChange={(e) => setApplicantName(e.target.value)} />
           </Field>
-          <Field label="Guardian Name">
-            <Input value={guardianName} onChange={(e) => setGuardianName(e.target.value)} />
+          <Field label={requireGuardian ? "Father / Guardian Name" : "Guardian Name"}>
+            <Input
+              value={guardianName}
+              onChange={(e) => setGuardianName(e.target.value)}
+              placeholder={requireGuardian ? "+ Add father name" : undefined}
+              autoFocus={needsGuardian}
+              className={needsGuardian ? "!border-amber-400 !ring-1 !ring-amber-300" : undefined}
+            />
           </Field>
         </div>
 
-        <PrimaryButton disabled={loading} onClick={runCheck} className="w-full mt-2">
+        <PrimaryButton disabled={loading || needsGuardian} onClick={runCheck} className="w-full mt-2">
           {loading ? "Searching…" : "Search Application"}
         </PrimaryButton>
 

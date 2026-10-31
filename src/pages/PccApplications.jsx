@@ -146,12 +146,12 @@ async function checkOnePcc(row) {
 
 const PCC_FILTERS = [
   { key: "", label: "All" },
-  { key: "__none__", label: "PCC Due" },
+  { key: "__none__", label: "Due" },
   { key: "Under Verification", label: "Under Verification" },
-  { key: "Certificate Issued", label: "Certificate Issued" },
+  { key: "Certificate Issued", label: "Issued" },
   { key: "Rejected", label: "Rejected" },
   { key: "Police Case", label: "Police Case" },
-  { key: "__draft__", label: "PCC Drafted" },
+  { key: "__draft__", label: "Drafted" },
 ];
 
 // Application date if set, otherwise the day it was submitted (in IST).
@@ -839,6 +839,7 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
         <PCCStatusCheckModal
           row={pccCheckRow}
           autoSearch
+          requireGuardian
           onClose={() => setPccCheckRow(null)}
           onStatusSynced={(id, updates) =>
             setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...updates } : r)))

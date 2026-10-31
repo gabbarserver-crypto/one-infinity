@@ -368,7 +368,7 @@ export default function DealerPortal({ dealer, identity, call, onLogout, pushTar
           <div className="min-w-0 flex-1">
             <p className="font-bold text-lg truncate">{dealer.name}</p>
             <p className="text-slate-300 text-xs truncate">
-              Dealer Portal · Code {dealer.code}
+              Code {dealer.code}
               {identity?.type === "dealer_staff" ? ` · ${identity.name}` : (dealer.contact_name ? ` · ${dealer.contact_name}` : "")}
             </p>
           </div>
@@ -1617,14 +1617,34 @@ function isDraftPccNo(pccNo) {
   return /^\d{13,}$/.test(String(pccNo || "").replace(/^DLSB-PCC\//i, "").trim());
 }
 
+// Download the uploaded PCC certificate as "<PCC No>.pdf" (same as the admin
+// side). Falls back to opening it in a new tab if the browser blocks the blob.
+async function downloadPccCertificate(row) {
+  const url = supabase.storage.from("application-documents").getPublicUrl(row.pcc_certificate_path).data.publicUrl;
+  if (!url) return;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blobUrl = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = `${String(row.pcc_no || row.draft_code || "PCC").replace(/^DLSB-PCC\//i, "").trim()}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+  } catch {
+    window.open(url, "_blank", "noopener");
+  }
+}
+
 const DEALER_PCC_FILTERS = [
   { key: "", label: "All" },
-  { key: "__none__", label: "PCC Due" },
+  { key: "__none__", label: "Due" },
   { key: "Under Verification", label: "Under Verification" },
-  { key: "Certificate Issued", label: "Certificate Issued" },
+  { key: "Certificate Issued", label: "Issued" },
   { key: "Rejected", label: "Rejected" },
-  { key: "Police Case", label: "Police Case" },
-  { key: "__draft__", label: "PCC Drafted" },
+  { key: "__draft__", label: "Drafted" },
 ];
 
 // Father name cell: shows the name, or an "+ Add father name" button when it's
@@ -1796,9 +1816,9 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
           <table className="scroll-table min-w-full text-sm border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
             <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-500">
               <tr>
-                <th className="text-left font-medium px-3 py-2">Date</th>
+                <th className="hidden sm:table-cell text-left font-medium px-3 py-2">Date</th>
                 <th className="text-left font-medium px-3 py-2">Applicant</th>
-                <th className="text-left font-medium px-3 py-2">Father Name</th>
+                <th className="hidden sm:table-cell text-left font-medium px-3 py-2">Father Name</th>
                 <th className="text-left font-medium px-3 py-2">Service</th>
                 <th className="text-left font-medium px-3 py-2">PCC No</th>
                 <th className="text-left font-medium px-3 py-2">Status</th>
@@ -1814,11 +1834,16 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
                     : "text-yellow-700 dark:text-yellow-500";
                 return (
                   <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
-                    <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">
+                    <td className="hidden sm:table-cell px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">
                       {r.submitted_at ? fmtDate(r.submitted_at) : "—"}
                     </td>
-                    <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">{r.applicant_name || "—"}</td>
                     <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                      {r.applicant_name || "—"}
+                      <div className="sm:hidden text-[11px] text-slate-400 dark:text-slate-500">
+                        {r.submitted_at ? fmtDate(r.submitted_at) : "—"}
+                      </div>
+                    </td>
+                    <td className="hidden sm:table-cell px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">
                       <DealerFatherCell row={r} onSave={saveFatherName} />
                     </td>
                     <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">
@@ -1828,8 +1853,8 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
                       {r.pcc_no ? (
                         <>
                           <button
-                            onClick={() => openPccCheck(r)}
-                            title="Click to track this application"
+                            onClick={() => (r.pcc_certificate_path ? downloadPccCertificate(r) : openPccCheck(r))}
+                            title={r.pcc_certificate_path ? "PCC certificate uploaded — click to download" : "Click to track this application"}
                             className={`font-semibold hover:underline ${pccColor}`}
                           >
                             {r.pcc_no}
@@ -1869,6 +1894,7 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
         <PCCStatusCheckModal
           row={pccCheckRow}
           autoSearch
+          requireGuardian
           onClose={() => setPccCheckRow(null)}
           onStatusSynced={(id, updates) =>
             setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...updates } : r)))
