@@ -1338,7 +1338,7 @@ function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, 
     return String(av).toLowerCase().localeCompare(String(bv).toLowerCase()) * dir;
   });
   return (
-    <Card title="My Applications" className="w-full min-w-0">
+    <Card hideTitleOnMobile title="My Applications" className="w-full min-w-0">
       <div className="flex items-center justify-between -mt-1 mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2 flex-wrap">
           {["All", "Draft", "Process", "Approved"].map((f) => (
@@ -1596,7 +1596,7 @@ function DealerAppointments({ dealerId, identity, refreshKey, fromYear = new Dat
   };
 
   return (
-    <Card title="Appointment" className="w-full min-w-0">
+    <Card hideTitleOnMobile title="Appointment" className="w-full min-w-0">
       <p className="text-xs text-slate-400 dark:text-slate-500 mb-3">
         Applications ready for their next service — Learner Licence issued 30+ days ago, and not already booked.
       </p>
@@ -1817,7 +1817,7 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
   };
 
   return (
-    <Card title="PCC Status">
+    <Card hideTitleOnMobile title="PCC Status">
       <div className="flex flex-wrap gap-2 mb-3">
         {DEALER_PCC_FILTERS.map((f) => {
           const active = filter === f.key;
@@ -2917,7 +2917,7 @@ function DealerLedger({ dealerId, refreshKey = 0, fromYear = new Date().getFullY
   };
 
   return (
-    <Card title="My Ledger">
+    <Card hideTitleOnMobile title="My Ledger">
       <p className="text-sm text-slate-500 dark:text-slate-500 mb-4">
         Running balance: <span className="font-bold text-slate-800 dark:text-slate-100">₹{currentBalance.toLocaleString("en-IN")}</span>
       </p>

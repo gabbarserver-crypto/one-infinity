@@ -64,10 +64,10 @@ export function StatusBadge({ status }) {
   );
 }
 
-export function Card({ title, children, className = "" }) {
+export function Card({ title, children, className = "", hideTitleOnMobile = false }) {
   return (
     <div className={`w-full min-w-0 max-w-full bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 ${className}`}>
-      {title && <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100 mb-4">{title}</h3>}
+      {title && <h3 className={`text-base font-semibold text-slate-800 dark:text-slate-100 mb-4 ${hideTitleOnMobile ? "hidden md:block" : ""}`}>{title}</h3>}
       {children}
     </div>
   );
