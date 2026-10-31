@@ -85,12 +85,12 @@ const TABS = ["Applications", "Appointment", "PCC Status", "Call/Chat", "Ledger"
 const LEDGER_SUBTABS = ["My Ledger", "Service", "Payments"];
 // Shown in the mobile top bar for whichever tab is selected.
 const MOBILE_TAB_TITLES = {
-  Applications: "MY APPLICATION",
-  Appointment: "APPOINTMENT",
-  "PCC Status": "PCC STATUS",
-  Ledger: "MY LEDGER",
-  "Call/Chat": "CALL / CHAT",
-  Staff: "STAFF",
+  Applications: "My Application",
+  Appointment: "Appointment",
+  "PCC Status": "PCC Status",
+  Ledger: "My Ledger",
+  "Call/Chat": "Call / Chat",
+  Staff: "Staff",
 };
 
 // Small reusable sortable <th> — click toggles asc/desc on that column,
@@ -377,7 +377,14 @@ export default function DealerPortal({ dealer, identity, call, onLogout, pushTar
       {/* Mobile-only compact header — on desktop, DealerSidebar above
           already carries profile/photo, app download, games, passkey,
           theme toggle, and logout. */}
-      <header className="md:hidden bg-[#0f1b3d] text-white px-4 py-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+      {/* Other tabs: just the tab's name in the top bar (mobile). */}
+      {tab !== "Dashboard" && (
+        <header className="md:hidden bg-[#0f1b3d] text-white px-4 py-3">
+          <h1 className="font-bold text-2xl truncate">{MOBILE_TAB_TITLES[tab] || tab}</h1>
+        </header>
+      )}
+      {/* Dashboard: the full header (logo, dealer name, app/games/passkey/theme/logout). */}
+      <header className={`${tab !== "Dashboard" ? "hidden" : "md:hidden"} bg-[#0f1b3d] text-white px-4 py-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2`}>
         <div className="flex items-center gap-3 min-w-0 flex-1 basis-0">
           <input
             type="file"
@@ -402,9 +409,9 @@ export default function DealerPortal({ dealer, identity, call, onLogout, pushTar
             </span>
           </button>
           <div className="min-w-0 flex-1">
-            <p className="font-bold text-lg truncate">{tab === "Dashboard" ? dealer.name : (MOBILE_TAB_TITLES[tab] || tab)}</p>
+            <p className="font-bold text-lg truncate">{dealer.name}</p>
             <p className="text-slate-300 text-xs truncate">
-              {tab === "Dashboard" ? "" : `${dealer.name} · `}Code {dealer.code}
+              Code {dealer.code}
               {identity?.type === "dealer_staff" ? ` · ${identity.name}` : (dealer.contact_name ? ` · ${dealer.contact_name}` : "")}
             </p>
           </div>
