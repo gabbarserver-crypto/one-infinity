@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase";
 import { Card, StatusBadge, PrimaryButton, GhostButton, DangerButton, Field, Input, Select, Modal, Toast, STATUS_DISPLAY_LABELS, ROW_STATUS_TINT } from "../components/UI";
 import ChatPanel from "../components/ChatPanel";
 import ApplicationChatModal from "../components/ApplicationChatModal";
+import { chatUnreadSummary } from "../lib/serverApi";
 import SearchableSelect from "../components/SearchableSelect";
 import { parseCSV, findByLabel } from "../lib/csv";
 import * as XLSX from "xlsx";
@@ -835,6 +836,25 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     }
   };
 
+  // Threads from the last load, so the badges can be refreshed (e.g. after a
+  // chat is opened/closed) without reloading the whole table.
+  const chatThreadsRef = useRef([]);
+  const applyChatUnread = useCallback(async () => {
+    const threads = chatThreadsRef.current;
+    if (!threads?.length) return;
+    try {
+      const { counts } = await chatUnreadSummary();
+      const next = {};
+      for (const t of threads) {
+        const n = Number(counts?.[t.id] || 0);
+        if (n > 0) next[t.application_id] = n;
+      }
+      setChatStatus(next);
+    } catch {
+      // keep whatever the fallback count showed
+    }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     // The service embed needs !inner (forcing an inner join) only when we're
@@ -1014,13 +1034,24 @@ export default function Applications({ restricted = false, canEdit = true, canAp
         }
         if (count > 0) statusByApp[t.application_id] = count;
       }
+      chatThreadsRef.current = threads;
       setChatStatus(statusByApp);
+      // Prefer this staff member's own read tracking: the badge clears once
+      // they've opened the chat. The "awaiting our reply" count above is only
+      // the fallback if the summary can't be fetched.
+      applyChatUnread();
     } catch {
       setChatStatus({});
     }
   }, [tab, filterDealer, filterRto, filterAgency, filterService, filterDateFrom, filterDateTo, showAllYears, searchAllYears]);
 
   useEffect(() => { load(); }, [load]);
+  // Opening a chat marks it read on the server; re-check the badges shortly
+  // after it opens and right after it closes so they clear without a reload.
+  useEffect(() => {
+    const t = setTimeout(applyChatUnread, chatApp ? 1500 : 300);
+    return () => clearTimeout(t);
+  }, [chatApp, applyChatUnread]);
   useEffect(() => {
     (async () => {
       const { data: s } = await supabase.from("staff").select("id, full_name");
