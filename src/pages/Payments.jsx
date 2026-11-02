@@ -103,15 +103,15 @@ export default function Payments({ staff } = {}) {
 
   // Money IN: dealer payments collected via UPI (UPI lands straight in the
   // bank; Cash/Bank-transfer-at-counter/Cheque from a dealer don't).
-  const bankUpiReceived = allPayments
+  const bankUpiReceived = React.useMemo(() => allPayments
     .filter((p) => p.dealer_id && p.payment_mode === "UPI")
-    .reduce((acc, p) => acc + Number(p.amount || 0), 0);
+    .reduce((acc, p) => acc + Number(p.amount || 0), 0), [allPayments]);
   // Money OUT to agencies: a direct agency payment (no dealer involved)
   // sent by Bank/UPI/Cheque comes straight out of the bank; Cash paid at
   // the counter doesn't.
-  const bankAgencyPaidOut = allPayments
+  const bankAgencyPaidOut = React.useMemo(() => allPayments
     .filter((p) => !p.dealer_id && p.paid_at_agency_id && p.payment_mode !== "Cash")
-    .reduce((acc, p) => acc + Number(p.amount || 0), 0);
+    .reduce((acc, p) => acc + Number(p.amount || 0), 0), [allPayments]);
   const bankBalance = bankUpiReceived - bankFeeDeducted - bankAgencyPaidOut;
 
   // Unified Bank Transactions feed: application-fee debits (dated by the
@@ -439,6 +439,17 @@ export default function Payments({ staff } = {}) {
     </th>
   );
 
+  // The two big tables are React.memo'd so typing in the form above doesn't
+  // re-render thousands of rows on every keystroke. That only works if the
+  // props they receive stay the same between renders, so these callbacks go
+  // through refs to always call the latest version.
+  const bulkDeleteRef = React.useRef(bulkDeletePayments);
+  bulkDeleteRef.current = bulkDeletePayments;
+  const deleteRef = React.useRef(deletePayment);
+  deleteRef.current = deletePayment;
+  const onBulkDeleteStable = React.useCallback((ids) => bulkDeleteRef.current(ids), []);
+  const onDeleteStable = React.useCallback((p) => deleteRef.current(p), []);
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -573,9 +584,9 @@ export default function Payments({ staff } = {}) {
           dateTo={allDateTo}
           setDateTo={setAllDateTo}
           isAdmin={isAdmin}
-          onBulkDelete={bulkDeletePayments}
+          onBulkDelete={onBulkDeleteStable}
           onEdit={setEditingPayment}
-          onDelete={deletePayment}
+          onDelete={onDeleteStable}
         />
       )}
 
@@ -625,18 +636,23 @@ function AllSortTh({ label, sortKeyName, sortKey, sortDir, onSort, align = "left
   );
 }
 
-function AllPaymentsTable({ payments, loading, query, setQuery, dateFrom, setDateFrom, dateTo, setDateTo, isAdmin, onBulkDelete, onEdit, onDelete }) {
+const payerName = (p) => p.dealers?.name || (p.paid_at_agency?.name ? `${p.paid_at_agency.name} (Agency)` : "—");
+
+// Rows drawn at a time in the two big tables (the rest load on "Show more").
+const TABLE_PAGE = 200;
+
+function AllPaymentsTableInner({ payments, loading, query, setQuery, dateFrom, setDateFrom, dateTo, setDateTo, isAdmin, onBulkDelete, onEdit, onDelete }) {
   const [selected, setSelected] = useState(new Set());
   const [sortKey, setSortKey] = useState("date");
   const [sortDir, setSortDir] = useState("desc");
-  const payerName = (p) => p.dealers?.name || (p.paid_at_agency?.name ? `${p.paid_at_agency.name} (Agency)` : "—");
+  const [limit, setLimit] = useState(TABLE_PAGE);
 
   const toggleSort = (key) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortKey(key); setSortDir(key === "amount" || key === "date" ? "desc" : "asc"); }
   };
 
-  const filtered = payments
+  const filtered = React.useMemo(() => payments
     .filter((p) => {
       if (query.trim()) {
         const q = query.trim().toLowerCase();
@@ -659,17 +675,20 @@ function AllPaymentsTable({ payments, loading, query, setQuery, dateFrom, setDat
       if (av < bv) return sortDir === "asc" ? -1 : 1;
       if (av > bv) return sortDir === "asc" ? 1 : -1;
       return 0;
-    });
+    }), [payments, query, dateFrom, dateTo, sortKey, sortDir]);
 
   // Selection is cleared whenever the visible set changes (new search/date
   // filter) so it can never silently hold onto an id that's since scrolled
   // out of view — "select all" always means "all of what you're looking at
   // right now", not some stale set from before you changed the filter.
-  useEffect(() => { setSelected(new Set()); }, [query, dateFrom, dateTo]);
+  useEffect(() => { setSelected(new Set()); setLimit(TABLE_PAGE); }, [query, dateFrom, dateTo]);
 
-  const allVisibleSelected = filtered.length > 0 && filtered.every((p) => selected.has(p.id));
+  // "Select all" covers the rows actually on screen, never rows still hidden
+  // behind "Show more" (so a bulk delete can't hit rows you haven't seen).
+  const shown = filtered.slice(0, limit);
+  const allVisibleSelected = shown.length > 0 && shown.every((p) => selected.has(p.id));
   const toggleSelectAll = () => {
-    setSelected(allVisibleSelected ? new Set() : new Set(filtered.map((p) => p.id)));
+    setSelected(allVisibleSelected ? new Set() : new Set(shown.map((p) => p.id)));
   };
   const toggleOne = (id) => {
     setSelected((prev) => {
@@ -679,7 +698,7 @@ function AllPaymentsTable({ payments, loading, query, setQuery, dateFrom, setDat
     });
   };
 
-  const total = filtered.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const total = React.useMemo(() => filtered.reduce((sum, p) => sum + Number(p.amount || 0), 0), [filtered]);
 
   const exportCSV = () => {
     const escapeCsv = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -761,7 +780,7 @@ function AllPaymentsTable({ payments, loading, query, setQuery, dateFrom, setDat
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((p) => (
+                {shown.map((p) => (
                   <tr key={p.id} className="border-t border-slate-100 dark:border-slate-800">
                     {isAdmin && (
                       <td className="px-3 py-2">
@@ -785,11 +804,19 @@ function AllPaymentsTable({ payments, loading, query, setQuery, dateFrom, setDat
               </tbody>
             </table>
           </div>
+          {filtered.length > limit && (
+            <div className="flex items-center justify-center gap-3 py-3 text-xs text-slate-500 dark:text-slate-400">
+              <span>Showing {limit} of {filtered.length}</span>
+              <button onClick={() => setLimit((n) => n + 300)} className="font-semibold text-blue-600 hover:underline">Show 300 more</button>
+              <button onClick={() => setLimit(filtered.length)} className="font-semibold text-blue-600 hover:underline">Show all</button>
+            </div>
+          )}
         </>
       )}
     </Card>
   );
 }
+const AllPaymentsTable = React.memo(AllPaymentsTableInner);
 
 // Bank Transactions — a chronological feed of every rupee that actually
 // moves through the bank account, built straight from the application and
@@ -801,8 +828,11 @@ function AllPaymentsTable({ payments, loading, query, setQuery, dateFrom, setDat
 //   • Received (credit) — a dealer payment collected via UPI.
 //   • Paid to Agency (debit) — a direct agency payment sent by
 //     Bank/UPI/Cheque (Cash paid at the counter never touches the bank).
-function BankTransactionsTable({ transactions, loading, query, setQuery, dateFrom, setDateFrom, dateTo, setDateTo }) {
-  const filtered = transactions.filter((t) => {
+function BankTransactionsTableInner({ transactions, loading, query, setQuery, dateFrom, setDateFrom, dateTo, setDateTo }) {
+  const [limit, setLimit] = useState(TABLE_PAGE);
+  useEffect(() => { setLimit(TABLE_PAGE); }, [query, dateFrom, dateTo]);
+
+  const filtered = React.useMemo(() => transactions.filter((t) => {
     if (query.trim()) {
       const q = query.trim().toLowerCase();
       if (!`${t.label} ${t.mode}`.toLowerCase().includes(q)) return false;
@@ -811,10 +841,12 @@ function BankTransactionsTable({ transactions, loading, query, setQuery, dateFro
     if (dateFrom && d < dateFrom) return false;
     if (dateTo && d > dateTo) return false;
     return true;
-  });
+  }), [transactions, query, dateFrom, dateTo]);
 
-  const credits = filtered.filter((t) => t.type === "credit").reduce((s, t) => s + t.amount, 0);
-  const debits = filtered.filter((t) => t.type === "debit").reduce((s, t) => s + t.amount, 0);
+  const { credits, debits } = React.useMemo(() => ({
+    credits: filtered.filter((t) => t.type === "credit").reduce((s, t) => s + t.amount, 0),
+    debits: filtered.filter((t) => t.type === "debit").reduce((s, t) => s + t.amount, 0),
+  }), [filtered]);
 
   return (
     <Card title="Bank Transactions">
@@ -851,7 +883,7 @@ function BankTransactionsTable({ transactions, loading, query, setQuery, dateFro
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((t) => (
+                {filtered.slice(0, limit).map((t) => (
                   <tr key={t.id} className="border-t border-slate-100 dark:border-slate-800">
                     <td className="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-500">{fmtDate(t.date)}</td>
                     <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{t.label}</td>
@@ -867,11 +899,19 @@ function BankTransactionsTable({ transactions, loading, query, setQuery, dateFro
               </tbody>
             </table>
           </div>
+          {filtered.length > limit && (
+            <div className="flex items-center justify-center gap-3 py-3 text-xs text-slate-500 dark:text-slate-400">
+              <span>Showing {limit} of {filtered.length}</span>
+              <button onClick={() => setLimit((n) => n + 300)} className="font-semibold text-blue-600 hover:underline">Show 300 more</button>
+              <button onClick={() => setLimit(filtered.length)} className="font-semibold text-blue-600 hover:underline">Show all</button>
+            </div>
+          )}
         </>
       )}
     </Card>
   );
 }
+const BankTransactionsTable = React.memo(BankTransactionsTableInner);
 
 // Bulk CSV import for Payments — mirrors the Applications import feature:
 // parse, resolve names to IDs, preview with per-row validation, then insert

@@ -143,19 +143,33 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
   // mistakes like a duplicate row, without touching the application/payment
   // it came from.
   // Admin-only: set/clear the Draft No on a PAYMENT row (links it to that
-  // application via the set_ledger_entry_draft_code RPC).
+  // application via the set_ledger_entry_draft_code RPC), or rename the Draft
+  // No of the APPLICATION behind a SERVICE row (set_application_draft_code).
   const [draftEditId, setDraftEditId] = useState(null);
   const [draftEditValue, setDraftEditValue] = useState("");
   const [draftSaving, setDraftSaving] = useState(false);
   const saveDraftCode = useCallback(async (row) => {
+    const isApplicationRow = row.entry_type === "SERVICE";
+    if (isApplicationRow && !row.source_application_id) { alert("This row isn't linked to an application."); return; }
     setDraftSaving(true);
-    const { data, error } = await supabase.rpc("set_ledger_entry_draft_code", {
-      p_entry_id: row.id,
-      p_draft_code: draftEditValue,
-    });
+    const { data, error } = isApplicationRow
+      ? await supabase.rpc("set_application_draft_code", {
+          p_application_id: row.source_application_id,
+          p_draft_code: draftEditValue,
+        })
+      : await supabase.rpc("set_ledger_entry_draft_code", {
+          p_entry_id: row.id,
+          p_draft_code: draftEditValue,
+        });
     setDraftSaving(false);
     if (error) { alert(error.message); return; }
-    setRowsState((prev) => prev.map((r) => (r.id === row.id ? { ...r, draft_code: data || null } : r)));
+    setRowsState((prev) => prev.map((r) => {
+      if (isApplicationRow) {
+        // every row of that application (service + agency fee) shows the new no
+        return r.source_application_id === row.source_application_id ? { ...r, draft_code: data || null } : r;
+      }
+      return r.id === row.id ? { ...r, draft_code: data || null } : r;
+    }));
     setDraftEditId(null);
     setDraftEditValue("");
   }, [draftEditValue]);
@@ -512,7 +526,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
                   <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
                     <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{fmtDate(r.entry_date)}</td>
                     <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">
-                      {isAdmin && r.entry_type === "PAYMENT" ? (
+                      {isAdmin && (r.entry_type === "PAYMENT" || (r.entry_type === "SERVICE" && r.source_application_id)) ? (
                         draftEditId === r.id ? (
                           <span className="inline-flex items-center gap-1">
                             <input
@@ -523,7 +537,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
                                 if (e.key === "Enter") saveDraftCode(r);
                                 if (e.key === "Escape") { setDraftEditId(null); setDraftEditValue(""); }
                               }}
-                              placeholder="ANK020"
+                              placeholder={r.entry_type === "SERVICE" ? "GVD0993" : "ANK020"}
                               className="w-24 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 px-1.5 py-0.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/40"
                             />
                             <button type="button" onClick={() => saveDraftCode(r)} disabled={draftSaving} className="text-xs font-semibold text-emerald-600 disabled:opacity-50">
