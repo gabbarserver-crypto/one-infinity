@@ -1500,6 +1500,18 @@ export default function Applications({ restricted = false, canEdit = true, canAp
       return;
     }
     const picked = list.find((item) => item.id === value);
+    if (field === "dealer_id") {
+      // Admin dealer change works at ANY status. The RPC also moves the
+      // application's charge entries on the ledger to the new dealer.
+      const { error: dErr } = await supabase.rpc("admin_change_application_dealer", {
+        p_application_id: id,
+        p_dealer_id: value,
+      });
+      if (dErr) { setToast("Failed to change dealer: " + dErr.message); return; }
+      setRows((rs) => rs.map((r) => (r.id === id ? { ...r, dealer_id: value, dealers: picked || r.dealers } : r)));
+      setToast("Dealer changed — ledger updated");
+      return;
+    }
     // Changing the service to a PCC-related one (e.g. "PCC" or "LL RIC
     // (with PCC Required)") auto-tags RTO as "PCC" too — see
     // isPccRelatedService/findPccRto above.
@@ -2480,7 +2492,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                     className={`px-3 py-2 whitespace-nowrap ${dealerHold[r.dealer_id] ? "text-rose-600 font-bold" : "text-slate-600 dark:text-slate-300"}`}
                     title={dealerHold[r.dealer_id] ? "This dealer is out of usable credit" : undefined}
                   >
-                    {r.status === "Draft Submitted" && isAdmin ? (
+                    {isAdmin ? (
                       <EditableSelect
                         width="w-36"
                         value={r.dealer_id}
