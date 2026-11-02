@@ -333,6 +333,16 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
         const rtoName = (rtoList.find((x) => x.id === r.rto_id)?.name || "").trim().toLowerCase();
         if (rtoName.includes("pcc")) return true;
       }
+      // PCC needed + a PCC No already entered (e.g. a drafted number) but the
+      // RTO was never filled in: still a PCC application — without this an LL
+      // RIC row drops out of this page (and its Drafted filter) the moment its
+      // PCC No is saved. CVR rows and rows with a real RTO are not affected.
+      if (
+        pccNeeded(r) &&
+        String(r.pcc_no || "").trim() &&
+        !r.rto_id &&
+        !isCvr(r.services)
+      ) return true;
       return (
         pccNeeded(r) &&
         rtoIsPccMarker(r, rtoList) &&

@@ -2492,7 +2492,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                     className={`px-3 py-2 whitespace-nowrap ${dealerHold[r.dealer_id] ? "text-rose-600 font-bold" : "text-slate-600 dark:text-slate-300"}`}
                     title={dealerHold[r.dealer_id] ? "This dealer is out of usable credit" : undefined}
                   >
-                    dealerLabel(r.dealers)
+                    {dealerLabel(r.dealers)}
                   </td>
                 )}
                 {visibleCols.service && (
