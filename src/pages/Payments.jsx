@@ -23,6 +23,7 @@ export default function Payments({ staff } = {}) {
   const [applications, setApplications] = useState([]);
   const [form, setForm] = useState(EMPTY_FORM);
   const [recent, setRecent] = useState([]);
+  const [editingTransfer, setEditingTransfer] = useState(null);
   const [transfers, setTransfers] = useState([]); // dealer -> dealer transfers (admin-created)
   const [toast, setToast] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -184,6 +185,25 @@ export default function Payments({ staff } = {}) {
     const { data, error } = await supabase.rpc("list_dealer_transfers", { p_limit: 50 });
     if (error) { console.error("list_dealer_transfers", error); return; }
     setTransfers(data || []);
+  };
+
+  const saveTransferEdit = async (f) => {
+    if (!f.from_dealer_id || !f.to_dealer_id) { setToast("Select both dealers"); return; }
+    if (f.from_dealer_id === f.to_dealer_id) { setToast("From and To dealer must be different"); return; }
+    if (!f.amount || parseFloat(f.amount) <= 0) { setToast("Amount is required"); return; }
+    const { error } = await supabase.rpc("update_dealer_transfer", {
+      p_group_id: editingTransfer.transfer_group_id,
+      p_from_dealer_id: f.from_dealer_id,
+      p_to_dealer_id: f.to_dealer_id,
+      p_amount: parseFloat(f.amount),
+      p_entry_date: f.entry_date || null,
+      p_reference_no: f.reference_no?.trim() || null,
+      p_remarks: f.remarks || null,
+    });
+    if (error) { setToast("Failed to update transfer: " + error.message); return; }
+    setToast("Transfer updated — both ledgers adjusted");
+    setEditingTransfer(null);
+    loadTransfers();
   };
 
   const deleteTransfer = async (t) => {
@@ -633,15 +653,16 @@ export default function Payments({ staff } = {}) {
               </thead>
               <tbody>
                 {transfers.map((t) => (
-                  <tr key={t.transfer_group_id} className="border-t border-slate-200 dark:border-slate-800">
+                  <tr key={t.transfer_group_id} className="border-t border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100">
                     <td className="px-3 py-2 whitespace-nowrap">{fmtDate(t.entry_date)}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{t.from_dealer}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{t.to_dealer}</td>
                     <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">₹{Number(t.amount).toLocaleString("en-IN")}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{t.reference_no || "—"}</td>
                     <td className="px-3 py-2">{t.remarks || "—"}</td>
-                    <td className="px-3 py-2 text-right">
-                      <button onClick={() => deleteTransfer(t)} className="text-xs text-rose-600 hover:underline">Delete</button>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <button onClick={() => setEditingTransfer(t)} className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline mr-3">Edit</button>
+                      <button onClick={() => deleteTransfer(t)} className="text-xs font-semibold text-rose-600 dark:text-rose-400 hover:underline">Delete</button>
                     </td>
                   </tr>
                 ))}
@@ -691,6 +712,15 @@ export default function Payments({ staff } = {}) {
           onBulkDelete={onBulkDeleteStable}
           onEdit={setEditingPayment}
           onDelete={onDeleteStable}
+        />
+      )}
+
+      {editingTransfer && (
+        <EditTransferModal
+          transfer={editingTransfer}
+          dealers={dealers}
+          onClose={() => setEditingTransfer(null)}
+          onSave={saveTransferEdit}
         />
       )}
 
@@ -1362,6 +1392,40 @@ function EditPaymentModal({ payment, onClose, onSave }) {
           {["Cash", "UPI", "Bank Transfer", "Cheque", "Card"].map((m) => <option key={m} value={m}>{m}</option>)}
         </Select>
       </Field>
+      <Field label="Reference No."><Input value={f.reference_no} onChange={set("reference_no")} /></Field>
+      <Field label="Remarks"><Input value={f.remarks} onChange={set("remarks")} /></Field>
+      <div className="flex gap-2">
+        <PrimaryButton onClick={() => onSave(f)}>Save Changes</PrimaryButton>
+        <GhostButton onClick={onClose}>Cancel</GhostButton>
+      </div>
+    </Modal>
+  );
+}
+
+// Admin-only edit of a Dealer -> Dealer transfer. Saves both ledger halves
+// together through update_dealer_transfer.
+function EditTransferModal({ transfer, dealers, onClose, onSave }) {
+  const [f, setF] = useState({
+    from_dealer_id: transfer.from_dealer_id,
+    to_dealer_id: transfer.to_dealer_id,
+    amount: transfer.amount,
+    entry_date: transfer.entry_date ? String(transfer.entry_date).slice(0, 10) : "",
+    reference_no: transfer.reference_no || "",
+    remarks: transfer.remarks || "",
+  });
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const opts = dealers.map((d) => ({ id: d.id, name: `${d.name} (${d.code})` }));
+
+  return (
+    <Modal title={`Edit Transfer — ${transfer.from_dealer} → ${transfer.to_dealer}`} onClose={onClose}>
+      <Field label="From Dealer" required>
+        <SearchableSelect value={f.from_dealer_id} onChange={(id) => setF((s) => ({ ...s, from_dealer_id: id }))} options={opts} placeholder="Type to search dealer…" />
+      </Field>
+      <Field label="To Dealer" required>
+        <SearchableSelect value={f.to_dealer_id} onChange={(id) => setF((s) => ({ ...s, to_dealer_id: id }))} options={opts.filter((o) => o.id !== f.from_dealer_id)} placeholder="Type to search dealer…" />
+      </Field>
+      <Field label="Date"><Input type="date" value={f.entry_date} onChange={set("entry_date")} /></Field>
+      <Field label="Amount" required><Input type="number" value={f.amount} onChange={set("amount")} /></Field>
       <Field label="Reference No."><Input value={f.reference_no} onChange={set("reference_no")} /></Field>
       <Field label="Remarks"><Input value={f.remarks} onChange={set("remarks")} /></Field>
       <div className="flex gap-2">
