@@ -1082,7 +1082,7 @@ function PaymentsImportModal({ dealers, agencies, onClose, onImported }) {
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-xl w-full max-w-4xl max-h-[85vh] overflow-y-auto p-5">
+      <div className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 dark:[color-scheme:dark] rounded-xl w-full max-w-4xl max-h-[85vh] overflow-y-auto p-5">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-slate-800 dark:text-slate-100">Import Payments</h3>
           <button onClick={onClose} className="text-slate-400 text-xl leading-none">×</button>
@@ -1115,8 +1115,8 @@ function PaymentsImportModal({ dealers, agencies, onClose, onImported }) {
         {preview.length > 0 && !result && (
           <div>
             <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg mb-4">
-              <table className="m-scroll w-full text-xs">
-                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500">
+              <table className="m-scroll w-full text-xs text-slate-700 dark:text-slate-200">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400">
                   <tr>
                     <th className="px-3 py-2 text-left">Import?</th>
                     <th className="px-3 py-2 text-left">Dealer</th>
@@ -1166,7 +1166,7 @@ function PaymentsImportModal({ dealers, agencies, onClose, onImported }) {
         {result && (
           <div className="text-center py-6">
             <p className="text-lg font-semibold text-emerald-600">Imported {result.imported} payment{result.imported !== 1 ? "s" : ""}</p>
-            {result.skipped > 0 && <p className="text-sm text-slate-400 mt-1">{result.skipped} row(s) skipped</p>}
+            {result.skipped > 0 && <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">{result.skipped} row(s) skipped</p>}
             {result.ledgerFailures?.length > 0 && (
               <div className="mt-4 text-left rounded-xl border border-rose-200 bg-rose-50 dark:bg-rose-500/10 dark:border-rose-500/30 px-3 py-2">
                 <p className="text-sm font-semibold text-rose-700 dark:text-rose-400">
