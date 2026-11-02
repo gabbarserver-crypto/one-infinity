@@ -1315,24 +1315,24 @@ export default function Applications({ restricted = false, canEdit = true, canAp
   // Draft IDs are unique per-dealer (not globally — see the CSV-import
   // matcher above), so a manual rename has to check for a collision within
   // that same dealer before saving, the same way the CSV import path does.
+  // ADMIN ONLY. Goes through the set_application_draft_code RPC (migration
+  // 019 + 020) so the Admin check, the same-dealer clash check and the
+  // ledger voucher_no re-pointing all happen on the server — a non-admin
+  // can't get around this by calling the table directly.
   const updateDraftCode = async (id, rawValue, row) => {
-    const value = String(rawValue || "").trim();
+    if (!isAdmin) { setEditingDraftCodeId(null); setToast("Only Admin can change a Draft ID"); return; }
+    const value = String(rawValue || "").trim().toUpperCase();
     if (!value) { setToast("Draft ID can't be empty"); return; }
     if (value === row.draft_code) { setEditingDraftCodeId(null); return; }
-    const { data: clash, error: clashError } = await supabase
-      .from("applications")
-      .select("id")
-      .eq("dealer_id", row.dealer_id)
-      .eq("draft_code", value)
-      .neq("id", id)
-      .maybeSingle();
-    if (clashError) { setToast("Failed to check Draft ID: " + clashError.message); return; }
-    if (clash) { setToast(`${value} is already used by another application for this dealer`); return; }
-    const { error } = await supabase.from("applications").update({ draft_code: value }).eq("id", id);
+    const { data: saved, error } = await supabase.rpc("set_application_draft_code", {
+      p_application_id: id,
+      p_draft_code: value,
+    });
     if (error) { setToast("Failed to update Draft ID: " + error.message); return; }
-    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, draft_code: value } : r)));
+    const finalCode = saved || value;
+    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, draft_code: finalCode } : r)));
     setEditingDraftCodeId(null);
-    setToast(`Draft ID updated to ${value}`);
+    setToast(`Draft ID updated to ${finalCode}`);
   };
 
   const updateRowField = async (id, field, value) => {
@@ -1494,6 +1494,11 @@ export default function Applications({ restricted = false, canEdit = true, canAp
   // those joined objects, not the raw *_id, so without this they'd show
   // stale requirements until the next full page reload.
   const updateDealerOrService = async (id, field, value, list) => {
+    // Dealer change is ADMIN ONLY (also enforced in the DB, migration 020).
+    if (field === "dealer_id" && !isAdmin) {
+      setToast("Only Admin can change the dealer");
+      return;
+    }
     const picked = list.find((item) => item.id === value);
     // Changing the service to a PCC-related one (e.g. "PCC" or "LL RIC
     // (with PCC Required)") auto-tags RTO as "PCC" too — see
@@ -2433,10 +2438,10 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                           </span>
                         )}
                       </button>
-                      {r.status === "Draft Submitted" && (
+                      {r.status === "Draft Submitted" && isAdmin && (
                         <button
                           onClick={() => { setEditingDraftCodeId(r.id); setDraftCodeInput(r.draft_code || ""); }}
-                          title="Edit Draft ID"
+                          title="Edit Draft ID (Admin only)"
                           className="text-slate-300 hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-400"
                         >
                           <Pencil size={12} />
@@ -2475,7 +2480,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                     className={`px-3 py-2 whitespace-nowrap ${dealerHold[r.dealer_id] ? "text-rose-600 font-bold" : "text-slate-600 dark:text-slate-300"}`}
                     title={dealerHold[r.dealer_id] ? "This dealer is out of usable credit" : undefined}
                   >
-                    {r.status === "Draft Submitted" ? (
+                    {r.status === "Draft Submitted" && isAdmin ? (
                       <EditableSelect
                         width="w-36"
                         value={r.dealer_id}

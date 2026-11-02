@@ -13,14 +13,17 @@ function isoToDDMMYYYY(iso) {
   return `${m[3]}-${m[2]}-${m[1]}`;
 }
 
+const EMPTY_FORM = { payment_type: "dealer", dealer_id: "", to_dealer_id: "", application_id: "", amount: "", payment_mode: "Cash", reference_no: "", remarks: "", paid_at_agency_id: "", paid_on: "" };
+
 export default function Payments({ staff } = {}) {
   const isAdmin = staff?.roles?.role_name === "Admin";
   const [editingPayment, setEditingPayment] = useState(null); // payment row being edited, or null
   const [dealers, setDealers] = useState([]);
   const [agencies, setAgencies] = useState([]);
   const [applications, setApplications] = useState([]);
-  const [form, setForm] = useState({ payment_type: "dealer", dealer_id: "", application_id: "", amount: "", payment_mode: "Cash", reference_no: "", remarks: "", paid_at_agency_id: "", paid_on: "" });
+  const [form, setForm] = useState(EMPTY_FORM);
   const [recent, setRecent] = useState([]);
+  const [transfers, setTransfers] = useState([]); // dealer -> dealer transfers (admin-created)
   const [toast, setToast] = useState(null);
   const [saving, setSaving] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -53,6 +56,7 @@ export default function Payments({ staff } = {}) {
       loadRecent();
       loadAllPayments();
       loadBankBalance();
+      loadTransfers();
     })();
   }, []);
 
@@ -176,6 +180,20 @@ export default function Payments({ staff } = {}) {
     })();
   }, [form.dealer_id]);
 
+  const loadTransfers = async () => {
+    const { data, error } = await supabase.rpc("list_dealer_transfers", { p_limit: 50 });
+    if (error) { console.error("list_dealer_transfers", error); return; }
+    setTransfers(data || []);
+  };
+
+  const deleteTransfer = async (t) => {
+    if (!window.confirm(`Delete transfer of ₹${Number(t.amount).toLocaleString("en-IN")} (${t.from_dealer} → ${t.to_dealer})? Both ledgers will be reversed.`)) return;
+    const { error } = await supabase.rpc("delete_dealer_transfer", { p_group_id: t.transfer_group_id });
+    if (error) { setToast("Failed to delete transfer: " + error.message); return; }
+    setToast("Transfer deleted");
+    loadTransfers();
+  };
+
   const loadRecent = async () => {
     const { data } = await supabase
       .from("payments")
@@ -229,9 +247,41 @@ export default function Payments({ staff } = {}) {
   };
 
   const submit = async () => {
-    const isAgencyOnly = form.payment_type === "agency";
+    const type = form.payment_type; // dealer | agency | dealer_agency | dealer_dealer
+    const isAgencyOnly = type === "agency";
+    const isDealerToAgency = type === "dealer_agency";
+    const isTransfer = type === "dealer_dealer";
+
+    if (isTransfer) {
+      if (!isAdmin) { setToast("Only Admin can move a payment from one dealer to another"); return; }
+      if (!form.dealer_id || !form.to_dealer_id) { setToast("Select both From Dealer and To Dealer"); return; }
+      if (form.dealer_id === form.to_dealer_id) { setToast("From Dealer and To Dealer must be different"); return; }
+      if (!form.amount || parseFloat(form.amount) <= 0) { setToast("Amount is required"); return; }
+      setSaving(true);
+      const { error: trfErr } = await supabase.rpc("record_dealer_transfer", {
+        p_from_dealer_id: form.dealer_id,
+        p_to_dealer_id: form.to_dealer_id,
+        p_amount: parseFloat(form.amount),
+        p_entry_date: form.paid_on || null,
+        p_reference_no: form.reference_no?.trim() || null,
+        p_remarks: form.remarks || null,
+      });
+      setSaving(false);
+      if (trfErr) { setToast("Transfer failed: " + trfErr.message); return; }
+      const fromName = dealers.find((d) => d.id === form.dealer_id)?.name;
+      const toName = dealers.find((d) => d.id === form.to_dealer_id)?.name;
+      setToast(`₹${Number(form.amount).toLocaleString("en-IN")} moved from ${fromName} to ${toName} — both ledgers updated`);
+      setForm(EMPTY_FORM);
+      loadTransfers();
+      return;
+    }
+
     if (isAgencyOnly ? !form.paid_at_agency_id : !form.dealer_id) {
       setToast(isAgencyOnly ? "Agency and amount are required" : "Dealer and amount are required");
+      return;
+    }
+    if (isDealerToAgency && !form.paid_at_agency_id) {
+      setToast("Select the agency the dealer paid");
       return;
     }
     if (!form.amount) {
@@ -274,7 +324,7 @@ export default function Payments({ staff } = {}) {
         reference_no: form.reference_no || null,
         receipt_no: receiptNo,
         remarks: form.remarks || null,
-        paid_at_agency_id: form.paid_at_agency_id || null,
+        paid_at_agency_id: (isAgencyOnly || isDealerToAgency) ? (form.paid_at_agency_id || null) : null,
         received_by: staffRow?.id || null,
         ...(form.paid_on ? { created_at: form.paid_on } : {}),
       })
@@ -295,7 +345,7 @@ export default function Payments({ staff } = {}) {
     // Writing straight to ledger_entries from the client is blocked by its
     // RLS policy, so this goes through the SECURITY DEFINER RPC instead
     // (same pattern as Applications' Amount field).
-    const agencyName = agencies.find((a) => a.id === form.paid_at_agency_id)?.name;
+    const agencyName = (isAgencyOnly || isDealerToAgency) ? agencies.find((a) => a.id === form.paid_at_agency_id)?.name : null;
     const { error: ledgerError } = await supabase.rpc("upsert_ledger_entry_for_payment", {
       p_payment_id: paymentRow.id,
     });
@@ -308,7 +358,7 @@ export default function Payments({ staff } = {}) {
     } else {
       setToast(`Payment recorded — ledger entry & receipt generated${agencyName ? ` (dealer & ${agencyName} ledgers updated)` : ""}`);
     }
-    setForm({ payment_type: "dealer", dealer_id: "", application_id: "", amount: "", payment_mode: "Cash", reference_no: "", remarks: "", paid_at_agency_id: "", paid_on: "" });
+    setForm(EMPTY_FORM);
     loadRecent();
     loadAllPayments();
   };
@@ -483,28 +533,13 @@ export default function Payments({ staff } = {}) {
         <div className="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="Payment Type" required>
             <Select value={form.payment_type} onChange={set("payment_type")}>
-              <option value="dealer">Dealer</option>
-              <option value="agency">Agency (no dealer involved)</option>
+              <option value="dealer">Pay to Dealer</option>
+              <option value="agency">Pay to Agency</option>
+              <option value="dealer_agency">Pay Dealer to Agency</option>
+              {isAdmin && <option value="dealer_dealer">Pay Dealer to Dealer</option>}
             </Select>
           </Field>
-          {form.payment_type === "dealer" ? (
-            <>
-              <Field label="Dealer" required>
-                <SearchableSelect
-                  value={form.dealer_id}
-                  onChange={(id) => setForm((s) => ({ ...s, dealer_id: id }))}
-                  options={dealers.map((d) => ({ id: d.id, name: `${d.name} (${d.code})` }))}
-                  placeholder="Type to search dealer…"
-                />
-              </Field>
-              <Field label="Application (optional)">
-                <Select value={form.application_id} onChange={set("application_id")} disabled={!form.dealer_id}>
-                  <option value="">— General payment, not tied to one application —</option>
-                  {applications.map((a) => <option key={a.id} value={a.id}>{a.draft_code} — {a.applicant_name}</option>)}
-                </Select>
-              </Field>
-            </>
-          ) : (
+          {form.payment_type === "agency" ? (
             <Field label="Agency" required>
               <SearchableSelect
                 value={form.paid_at_agency_id}
@@ -513,6 +548,46 @@ export default function Payments({ staff } = {}) {
                 placeholder="Type to search agency…"
               />
             </Field>
+          ) : (
+            <>
+              <Field label={form.payment_type === "dealer_dealer" ? "From Dealer" : "Dealer"} required>
+                <SearchableSelect
+                  value={form.dealer_id}
+                  onChange={(id) => setForm((s) => ({ ...s, dealer_id: id }))}
+                  options={dealers.map((d) => ({ id: d.id, name: `${d.name} (${d.code})` }))}
+                  placeholder="Type to search dealer…"
+                />
+              </Field>
+              {form.payment_type === "dealer_dealer" ? (
+                <Field label="To Dealer" required>
+                  <SearchableSelect
+                    value={form.to_dealer_id}
+                    onChange={(id) => setForm((s) => ({ ...s, to_dealer_id: id }))}
+                    options={dealers.filter((d) => d.id !== form.dealer_id).map((d) => ({ id: d.id, name: `${d.name} (${d.code})` }))}
+                    placeholder="Type to search dealer…"
+                  />
+                </Field>
+              ) : (
+                <>
+                  {form.payment_type === "dealer_agency" && (
+                    <Field label="Agency (dealer paid here)" required>
+                      <SearchableSelect
+                        value={form.paid_at_agency_id}
+                        onChange={(id) => setForm((s) => ({ ...s, paid_at_agency_id: id }))}
+                        options={agencies.map((a) => ({ id: a.id, name: `${a.name} (${a.code})` }))}
+                        placeholder="Type to search agency…"
+                      />
+                    </Field>
+                  )}
+                  <Field label="Application (optional)">
+                    <Select value={form.application_id} onChange={set("application_id")} disabled={!form.dealer_id}>
+                      <option value="">— General payment, not tied to one application —</option>
+                      {applications.map((a) => <option key={a.id} value={a.id}>{a.draft_code} — {a.applicant_name}</option>)}
+                    </Select>
+                  </Field>
+                </>
+              )}
+            </>
           )}
           <Field label="Date">
             <Input type="date" value={form.paid_on} onChange={set("paid_on")} />
@@ -520,22 +595,16 @@ export default function Payments({ staff } = {}) {
           <Field label="Amount (₹)" required>
             <Input type="number" value={form.amount} onChange={set("amount")} />
           </Field>
-          <Field label="Payment Mode" required>
-            <Select value={form.payment_mode} onChange={set("payment_mode")}>
-              <option>Cash</option><option>UPI</option><option>Bank</option><option>Cheque</option>
-            </Select>
-          </Field>
-          <Field label="Reference No.">
-            <Input value={form.reference_no} onChange={set("reference_no")} placeholder="UTR / cheque no." />
-          </Field>
-          {form.payment_type === "dealer" && (
-            <Field label="Paid At (Agency)">
-              <Select value={form.paid_at_agency_id} onChange={set("paid_at_agency_id")}>
-                <option value="">— Not via an agency —</option>
-                {agencies.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.code})</option>)}
+          {form.payment_type !== "dealer_dealer" && (
+            <Field label="Payment Mode" required>
+              <Select value={form.payment_mode} onChange={set("payment_mode")}>
+                <option>Cash</option><option>UPI</option><option>Bank</option><option>Cheque</option>
               </Select>
             </Field>
           )}
+          <Field label="Reference No.">
+            <Input value={form.reference_no} onChange={set("reference_no")} placeholder="UTR / cheque no." />
+          </Field>
           <div className="sm:col-span-2 lg:col-span-4">
             <Field label="Remarks">
               <Input value={form.remarks} onChange={set("remarks")} />
@@ -543,9 +612,44 @@ export default function Payments({ staff } = {}) {
           </div>
         </div>
         <PrimaryButton onClick={submit} disabled={saving}>
-          {saving ? "Saving..." : "Save Payment & Generate Receipt"}
+          {saving ? "Saving..." : form.payment_type === "dealer_dealer" ? "Move Payment Between Dealers" : "Save Payment & Generate Receipt"}
         </PrimaryButton>
       </Card>
+
+      {isAdmin && transfers.length > 0 && (
+        <Card title="Recent Dealer → Dealer Transfers">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                <tr>
+                  <th className="px-3 py-2 text-left">Date</th>
+                  <th className="px-3 py-2 text-left">From Dealer</th>
+                  <th className="px-3 py-2 text-left">To Dealer</th>
+                  <th className="px-3 py-2 text-right">Amount</th>
+                  <th className="px-3 py-2 text-left">Reference</th>
+                  <th className="px-3 py-2 text-left">Remarks</th>
+                  <th className="px-3 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {transfers.map((t) => (
+                  <tr key={t.transfer_group_id} className="border-t border-slate-200 dark:border-slate-800">
+                    <td className="px-3 py-2 whitespace-nowrap">{fmtDate(t.entry_date)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{t.from_dealer}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{t.to_dealer}</td>
+                    <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">₹{Number(t.amount).toLocaleString("en-IN")}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{t.reference_no || "—"}</td>
+                    <td className="px-3 py-2">{t.remarks || "—"}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button onClick={() => deleteTransfer(t)} className="text-xs text-rose-600 hover:underline">Delete</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       <div className="flex gap-2 border-b border-slate-200 dark:border-slate-800 mb-1">
         <button
