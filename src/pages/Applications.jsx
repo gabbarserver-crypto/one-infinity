@@ -1497,7 +1497,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     // Dealer change is ADMIN ONLY (also enforced in the DB, migration 020).
     if (field === "dealer_id" && !isAdmin) {
       setToast("Only Admin can change the dealer");
-      return;
+      return false;
     }
     const picked = list.find((item) => item.id === value);
     if (field === "dealer_id") {
@@ -1507,10 +1507,10 @@ export default function Applications({ restricted = false, canEdit = true, canAp
         p_application_id: id,
         p_dealer_id: value,
       });
-      if (dErr) { setToast("Failed to change dealer: " + dErr.message); return; }
+      if (dErr) { setToast("Failed to change dealer: " + dErr.message); return false; }
       setRows((rs) => rs.map((r) => (r.id === id ? { ...r, dealer_id: value, dealers: picked || r.dealers } : r)));
       setToast("Dealer changed — ledger updated");
-      return;
+      return true;
     }
     // Changing the service to a PCC-related one (e.g. "PCC" or "LL RIC
     // (with PCC Required)") auto-tags RTO as "PCC" too — see
@@ -2492,17 +2492,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                     className={`px-3 py-2 whitespace-nowrap ${dealerHold[r.dealer_id] ? "text-rose-600 font-bold" : "text-slate-600 dark:text-slate-300"}`}
                     title={dealerHold[r.dealer_id] ? "This dealer is out of usable credit" : undefined}
                   >
-                    {isAdmin ? (
-                      <EditableSelect
-                        width="w-36"
-                        value={r.dealer_id}
-                        options={dealerList.map((d) => ({ id: d.id, name: dealerLabel(d) }))}
-                        placeholder="Select Dealer"
-                        onSave={(v) => v && updateDealerOrService(r.id, "dealer_id", v, dealerList)}
-                      />
-                    ) : (
-                      dealerLabel(r.dealers)
-                    )}
+                    dealerLabel(r.dealers)
                   </td>
                 )}
                 {visibleCols.service && (
@@ -2893,6 +2883,11 @@ export default function Applications({ restricted = false, canEdit = true, canAp
           onlyDraft={onlyDraft}
           rtoList={rtoList}
           agencyList={agencyList}
+          dealerList={dealerList}
+          onChangeDealer={async (v) => {
+            const ok = await updateDealerOrService(selected.id, "dealer_id", v, dealerList);
+            if (ok) setSelected((s) => (s ? { ...s, dealer_id: v, dealers: dealerList.find((d) => d.id === v) || s.dealers } : s));
+          }}
           onClose={closeDetail}
           onStatusChange={updateStatus}
           onDelete={deleteApplication}
@@ -4299,7 +4294,7 @@ function RemarkPopup({ row, status, onCancel, onConfirm }) {
   );
 }
 
-function ApplicationDetailModal({ app, mode = "customer", staffList, restricted = false, canApprove = true, isAdmin = false, onlyDraft = false, rtoList = [], agencyList = [], onClose, onStatusChange, onDelete, onAssign, onSaveAnswers, onSaveApplicant, onSaveField, onSaveAmount, onSavePccFee, onSaveAgencyFee, onSaveAgencyId, onDocsChanged }) {
+function ApplicationDetailModal({ app, mode = "customer", staffList, restricted = false, canApprove = true, isAdmin = false, onlyDraft = false, rtoList = [], agencyList = [], dealerList = [], onChangeDealer, onClose, onStatusChange, onDelete, onAssign, onSaveAnswers, onSaveApplicant, onSaveField, onSaveAmount, onSavePccFee, onSaveAgencyFee, onSaveAgencyId, onDocsChanged }) {
   const [remarks, setRemarks] = useState(app.remarks || "");
   const [staffId, setStaffId] = useState(app.assigned_staff_id || "");
   const [staffIdentity, setStaffIdentity] = useState(null);
@@ -4665,7 +4660,21 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
       <>
       <Modal title={`Application — ${app.draft_code}`} onClose={onClose} size="xl">
         <div className="rounded-xl border border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-slate-950/30 px-4 py-3 mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-800 dark:text-slate-100">
-          <span><span className="font-semibold text-slate-500 dark:text-slate-400">Dealer:</span> <span className="font-bold">{dealerLabel(app.dealers) || "—"}</span></span>
+          <span className="flex items-center gap-1.5">
+            <span className="font-semibold text-slate-500 dark:text-slate-400">Dealer:</span>
+            {isAdmin && onChangeDealer ? (
+              <select
+                value={app.dealer_id || ""}
+                onChange={(e) => e.target.value && e.target.value !== app.dealer_id && window.confirm("Change dealer for this application? Its ledger charge will move to the new dealer.") && onChangeDealer(e.target.value)}
+                title="Change dealer (Admin only)"
+                className="max-w-[14rem] rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 px-1.5 py-1 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-blue-400"
+              >
+                {dealerList.map((d) => <option key={d.id} value={d.id}>{dealerLabel(d)}</option>)}
+              </select>
+            ) : (
+              <span className="font-bold">{dealerLabel(app.dealers) || "—"}</span>
+            )}
+          </span>
           <span><span className="font-semibold text-slate-500 dark:text-slate-400">Service:</span> <span className="font-bold">{serviceLabel(app.services) || "—"}</span></span>
           <span><span className="font-semibold text-slate-500 dark:text-slate-400">RTO:</span> <span className="font-bold">{rtoList.find((x) => x.id === app.rto_id)?.name || "—"}</span></span>
           <span className="flex items-center gap-1.5">
