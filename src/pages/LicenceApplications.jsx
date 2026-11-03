@@ -9,7 +9,7 @@
 // (Staff View)" tab — same rule as the PCC page.
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { Card, GhostButton } from "../components/UI";
+import { Card, GhostButton, Toast } from "../components/UI";
 import { fetchAllRows } from "../lib/fetchAll";
 import { todayIST } from "../lib/dates";
 import * as XLSX from "xlsx";
@@ -113,7 +113,21 @@ function SortTh({ column, label, sortKey, sortDir, onSort }) {
 }
 
 const SELECT_COLS =
-  "id, draft_code, application_date, submitted_at, amount, rto_fee, status, applicant_name, application_no, ll_dl_no, slot_time, remarks, rto_id, service_id, pcc_no, pcc_status, pcc_stage, pcc_timeline, pcc_not_required, dealers(name,code,short_name), services(parent_service,short_name,pcc_required,ll_dl_no_required)";
+  "id, draft_code, date_of_birth, application_date, submitted_at, amount, rto_fee, status, applicant_name, application_no, ll_dl_no, slot_time, remarks, rto_id, service_id, pcc_no, pcc_status, pcc_stage, pcc_timeline, pcc_not_required, dealers(name,code,short_name), services(parent_service,short_name,pcc_required,ll_dl_no_required)";
+
+// Same stored-file link the Applications page uses: keep the public URL but
+// ask the browser to save it as "application.<ext>".
+function learningDownloadUrl(fileUrl) {
+  if (!fileUrl) return "";
+  try {
+    const url = new URL(fileUrl);
+    const ext = (url.pathname.match(/\.([a-z0-9]+)$/i)?.[1] || "pdf").toLowerCase();
+    url.searchParams.set("download", `application.${ext}`);
+    return url.toString();
+  } catch {
+    return fileUrl;
+  }
+}
 
 function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
   const isDl = kind === "dl";
@@ -129,6 +143,8 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
   const [sortDir, setSortDir] = useState("desc");
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState("");
+  const [toast, setToast] = useState(null);
+  const [learningDocs, setLearningDocs] = useState({}); // { [applicationId]: file_url }
   const today = todayIST();
 
   // Staff with only the restricted Staff View never see Amount.
@@ -163,9 +179,51 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
       if (res.error) setError("Couldn't load applications: " + res.error.message);
       else setRows(res.data || []);
       setLoading(false);
+
+      // Uploaded Learning files for the rows that already have an LL/DL No.,
+      // so that number becomes a direct download link (same as Applications).
+      try {
+        const appIds = (res.data || []).filter((r) => r.ll_dl_no).map((r) => r.id);
+        const docs = {};
+        for (let i = 0; i < appIds.length; i += 200) {
+          const { data } = await supabase
+            .from("application_documents")
+            .select("application_id, file_url")
+            .in("application_id", appIds.slice(i, i + 200))
+            .ilike("name", "%learning%")
+            .not("file_url", "is", null);
+          for (const d of data || []) if (d.file_url && !docs[d.application_id]) docs[d.application_id] = d.file_url;
+        }
+        if (!cancelled) setLearningDocs(docs);
+      } catch {
+        if (!cancelled) setLearningDocs({});
+      }
     })();
     return () => { cancelled = true; };
   }, [kind]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Application No -> Sarathi application status page (DOB copied for pasting).
+  const openSarathi = async (row) => {
+    if (!row.application_no) { setToast("Enter Application No first"); return; }
+    if (row.date_of_birth) {
+      const dob = isoToDDMMYYYY(row.date_of_birth);
+      try { await navigator.clipboard.writeText(dob); setToast("DOB copied: " + dob); } catch { /* clipboard may be blocked */ }
+    }
+    window.open(
+      `https://sarathi.parivahan.gov.in/sarathiservice/applicationredirect.do?as=${encodeURIComponent(row.application_no)}`,
+      "_blank", "noopener,noreferrer"
+    );
+  };
+
+  // LL/DL No with no stored file -> Sarathi's Learning download page.
+  const openLearningDownloadPage = async (row) => {
+    if (!row.application_no) { setToast("Enter Application No first"); return; }
+    try { await navigator.clipboard.writeText(row.ll_dl_no); setToast("Learning No copied: " + row.ll_dl_no); } catch { /* clipboard may be blocked */ }
+    window.open(
+      `https://sarathi.parivahan.gov.in/sarathiservice/applicationredirect.do?q=${encodeURIComponent(row.application_no)}`,
+      "_blank", "noopener,noreferrer"
+    );
+  };
 
   const rtoName = (id) => rtoList.find((x) => x.id === id)?.name || "";
 
@@ -319,9 +377,41 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
                       <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{dealerLabel(r.dealers)}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{serviceLabel(r.services)}</td>
                       <td className="px-3 py-2 whitespace-nowrap font-semibold text-slate-800 dark:text-slate-100">{r.applicant_name}</td>
-                      <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{r.application_no || ""}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {r.application_no ? (
+                          <button
+                            type="button"
+                            onClick={() => openSarathi(r)}
+                            title="Open application status on Sarathi Parivahan (also copies DOB)"
+                            className="font-medium text-blue-600 hover:underline text-left"
+                          >
+                            {r.application_no}
+                          </button>
+                        ) : ""}
+                      </td>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{r.rto_fee ?? ""}</td>
-                      <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{r.ll_dl_no || ""}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {r.ll_dl_no && learningDocs[r.id] ? (
+                          <a
+                            href={learningDownloadUrl(learningDocs[r.id])}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Download uploaded Learning file"
+                            className="font-medium text-blue-600 hover:underline"
+                          >
+                            {r.ll_dl_no}
+                          </a>
+                        ) : r.ll_dl_no ? (
+                          <button
+                            type="button"
+                            onClick={() => openLearningDownloadPage(r)}
+                            title="Download from Sarathi (copies the number)"
+                            className="font-medium text-amber-600 hover:underline"
+                          >
+                            {r.ll_dl_no}
+                          </button>
+                        ) : ""}
+                      </td>
                       {isDl && <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{rtoName(r.rto_id)}</td>}
                       {isDl && <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{r.slot_time || ""}</td>}
                       <td className="px-3 py-2">
@@ -349,6 +439,7 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
           </div>
         </div>
       </Card>
+      {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>
   );
 }
