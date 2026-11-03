@@ -23,7 +23,7 @@ import DocUploadDropzone from "../components/DocUploadDropzone";
 import ImageCropModal from "../components/ImageCropModal";
 
 
-const STATUS_TABS = ["All", "Draft Submitted", "Under Review", "On Hold", "Rejected", "Accepted"];
+const STATUS_TABS = ["All", "Draft Submitted", "Under Review", "On Hold", "Accepted"];
 
 // Columns a staff member can hide/show via the "Columns" button. Draft ID
 // and Status stay pinned (always shown) since they're the primary way to
@@ -2208,29 +2208,6 @@ export default function Applications({ restricted = false, canEdit = true, canAp
               )}
             </button>
           )}
-          {[
-            ["Rejected", "PCC Rejected", "bg-red-600 text-white border-red-600"],
-            ["Under Verification", "PCC Under Verification", "bg-yellow-500 text-white border-yellow-500"],
-            ["Certificate Issued", "PCC Issued", "bg-green-600 text-white border-green-600"],
-          ].map(([value, label, activeCls]) => {
-            const active = pccStatusOnly === value;
-            const count = rows.filter((r) => r.pcc_status === value && rtoIsPccMarker(r, rtoList)).length;
-            return (
-              <button
-                key={value}
-                onClick={() => setPccStatusOnly(active ? "" : value)}
-                title={`Show only applications whose PCC status is "${value}"`}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold border flex items-center gap-1.5 ${
-                  active ? activeCls : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700"
-                }`}
-              >
-                {label}
-                <span className={`min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${active ? "bg-white/25 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200"}`}>
-                  {count.toLocaleString("en-IN")}
-                </span>
-              </button>
-            );
-          })}
           {!restricted && selectedIds.size > 0 && (
             <button
               onClick={bulkAcceptSelected}
@@ -2249,28 +2226,6 @@ export default function Applications({ restricted = false, canEdit = true, canAp
               {bulkHolding ? "Putting On Hold…" : `⏸ Put On Hold (${selectedIds.size})`}
             </button>
           )}
-        </div>
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex items-center gap-2">
-            {!onlyDraft && (
-              <button
-                onClick={() => setShowAllYears((v) => !v)}
-                title={showAllYears ? "Currently showing every year — click to go back to this year only" : `Currently showing ${currentYear} only — click to see all years`}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
-                  showAllYears ? "bg-amber-500 text-white border-amber-500" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700"
-                }`}
-              >
-                {showAllYears ? "📅 Showing All Years" : `📅 ${currentYear} Only`}
-              </button>
-            )}
-            {canEdit && <PrimaryButton onClick={() => setShowNew(true)}>+ New Application</PrimaryButton>}
-          </div>
-          <button
-            onClick={() => setShowRemarkMobile((s) => !s)}
-            className="text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-blue-600"
-          >
-            {showRemarkMobile ? "Hide" : "Show"} Remark &amp; Mobile{!restricted && " & Profit"}
-          </button>
         </div>
       </div>
 
@@ -2330,6 +2285,28 @@ export default function Applications({ restricted = false, canEdit = true, canAp
             Clear all
           </button>
         )}
+        <div className="flex flex-col items-end gap-2 ml-auto">
+          <div className="flex items-center gap-2">
+            {!onlyDraft && (
+              <button
+                onClick={() => setShowAllYears((v) => !v)}
+                title={showAllYears ? "Currently showing every year — click to go back to this year only" : `Currently showing ${currentYear} only — click to see all years`}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+                  showAllYears ? "bg-amber-500 text-white border-amber-500" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700"
+                }`}
+              >
+                {showAllYears ? "📅 Showing All Years" : `📅 ${currentYear} Only`}
+              </button>
+            )}
+            {canEdit && <PrimaryButton onClick={() => setShowNew(true)}>+ New Application</PrimaryButton>}
+          </div>
+          <button
+            onClick={() => setShowRemarkMobile((s) => !s)}
+            className="text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-blue-600"
+          >
+            {showRemarkMobile ? "Hide" : "Show"} Remark &amp; Mobile{!restricted && " & Profit"}
+          </button>
+        </div>
       </div>
 
       {showFilters && (
