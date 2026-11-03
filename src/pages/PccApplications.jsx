@@ -852,14 +852,17 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
                         ) : (
                           <span className="text-slate-300 dark:text-slate-600">—</span>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => markNotRequired(r)}
-                          title="Mark PCC as Not Required (removes this row from the list)"
-                          className="ml-2 inline-flex items-center gap-1 rounded border border-slate-300 dark:border-slate-700 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400 hover:border-rose-400 hover:text-rose-500"
-                        >
-                          <Ban size={10} /> Not required
-                        </button>
+                        {/* Only for Due rows (no PCC No yet) — a row that already has a PCC No is needed. */}
+                        {!r.pcc_no && (
+                          <button
+                            type="button"
+                            onClick={() => markNotRequired(r)}
+                            title="Mark PCC as Not Required (removes this row from the list)"
+                            className="ml-2 inline-flex items-center gap-1 rounded border border-slate-300 dark:border-slate-700 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400 hover:border-rose-400 hover:text-rose-500"
+                          >
+                            <Ban size={10} /> Not required
+                          </button>
+                        )}
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
