@@ -73,6 +73,12 @@ function isHoldText(r) {
   return /^\s*hold\b/i.test(String(r.ll_dl_no || ""));
 }
 
+// "CLOSED" typed at the start of LL/DL No. closes the application by hand
+// (e.g. "CLOSED", "CLOSED - ALREADY DL"), whatever the amount is.
+function isClosedText(r) {
+  return /^\s*closed\b/i.test(String(r.ll_dl_no || ""));
+}
+
 // One bucket per application, checked top to bottom.
 //  Learning: Issued -> Hold -> Closed (reason typed + amount filled)
 //            -> Under Process (RTO fee unpaid) -> Pending (no number yet)
@@ -83,6 +89,7 @@ function isHoldText(r) {
 //            -> Waiting for RTO Approval (slot date is over)
 function bucketOf(r, isDl, today) {
   if (isIssued(r)) return "issued";
+  if (isClosedText(r)) return "closed";
   if (r.status === "On Hold" || isHoldText(r)) return "hold";
   if (hasReasonText(r) && amountFilled(r)) return "closed";
   if (isDl) {
