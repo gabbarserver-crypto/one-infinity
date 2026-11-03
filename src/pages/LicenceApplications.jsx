@@ -58,17 +58,37 @@ function feePaid(r) {
   return Number(r.rto_fee) > 0;
 }
 
+// Amount counts as filled only when it is above 0 (0 = nothing charged yet).
+function amountFilled(r) {
+  return Number(r.amount) > 0;
+}
+// LL/DL No. holds a typed reason (no digits at all) such as "ALREADY DL",
+// "BY DL", "cancelled", "NA" — the licence was not issued for that reason.
+function hasReasonText(r) {
+  const t = String(r.ll_dl_no || "").trim();
+  return !!t && !/\d/.test(t);
+}
+// A typed "HOLD" in LL/DL No. means the same as the On Hold status.
+function isHoldText(r) {
+  return /^\s*hold\b/i.test(String(r.ll_dl_no || ""));
+}
+
 // One bucket per application, checked top to bottom.
-//  Learning: Issued -> Hold -> Under Process (RTO fee unpaid) -> Pending (no number yet)
-//  DL:       Issued -> Hold -> Waiting for Slot Booking (no slot yet)
-//            -> Under Process (RTO fee unpaid) -> Slot Pending (waits until the
-//            slot date) -> Waiting for RTO Approval (slot date is over)
+//  Learning: Issued -> Hold -> Closed (reason typed + amount filled)
+//            -> Under Process (RTO fee unpaid) -> Pending (no number yet)
+//  DL:       Issued -> Hold -> Closed (reason typed + amount filled)
+//            -> Pending (amount not filled) -> Under Process (RTO fee unpaid)
+//            -> Waiting for Slot Booking (amount + RTO fee paid, no slot yet)
+//            -> Slot Pending (waits until the slot date)
+//            -> Waiting for RTO Approval (slot date is over)
 function bucketOf(r, isDl, today) {
   if (isIssued(r)) return "issued";
-  if (r.status === "On Hold") return "hold";
+  if (r.status === "On Hold" || isHoldText(r)) return "hold";
+  if (hasReasonText(r) && amountFilled(r)) return "closed";
   if (isDl) {
-    if (!String(r.slot_time || "").trim()) return "slotbooking";
+    if (!amountFilled(r)) return "pending";
     if (!feePaid(r)) return "process";
+    if (!String(r.slot_time || "").trim()) return "slotbooking";
     const iso = slotISO(r.slot_time);
     return iso && iso < today ? "approval" : "slotwait";
   }
@@ -77,6 +97,7 @@ function bucketOf(r, isDl, today) {
 
 const BUCKET_LABEL = {
   issued: "Issued",
+  closed: "Closed",
   pending: "Pending",
   process: "Under Process",
   slotbooking: "Waiting for Slot Booking",
@@ -85,6 +106,7 @@ const BUCKET_LABEL = {
   hold: "Hold",
 };
 const BUCKET_STYLE = {
+  closed: "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200",
   issued: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
   pending: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
   process: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
@@ -93,8 +115,8 @@ const BUCKET_STYLE = {
   approval: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
   hold: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
 };
-const FILTERS_LL = ["", "issued", "pending", "process", "hold"];
-const FILTERS_DL = ["", "issued", "slotbooking", "process", "slotwait", "approval", "hold"];
+const FILTERS_LL = ["", "issued", "closed", "pending", "process", "hold"];
+const FILTERS_DL = ["", "issued", "closed", "pending", "slotbooking", "process", "slotwait", "approval", "hold"];
 
 function SortTh({ column, label, sortKey, sortDir, onSort }) {
   const active = sortKey === column;
