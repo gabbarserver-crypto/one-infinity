@@ -1500,6 +1500,14 @@ export default function Applications({ restricted = false, canEdit = true, canAp
       return false;
     }
     const picked = list.find((item) => item.id === value);
+    // Service can only be changed while Amount is still empty/0.
+    if (field === "service_id") {
+      const cur = rows.find((r) => r.id === id);
+      if (cur && Number(cur.amount) > 0) {
+        setToast("Amount bhar diya gaya hai — ab service change nahi ho sakti");
+        return false;
+      }
+    }
     if (field === "dealer_id") {
       // Admin dealer change works at ANY status. The RPC also moves the
       // application's charge entries on the ledger to the new dealer.
@@ -1521,10 +1529,11 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     const { error } = await supabase.from("applications").update({ [field]: value, ...extra }).eq("id", id);
     if (error) {
       setToast("Failed to update: " + error.message);
-      return;
+      return false;
     }
     const joinedKey = field === "dealer_id" ? "dealers" : "services";
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, [field]: value, ...extra, [joinedKey]: picked || r[joinedKey] } : r)));
+    return true;
   };
 
   const openSarathi = async (row) => {
@@ -2497,25 +2506,10 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                 )}
                 {visibleCols.service && (
                   <td className="px-3 py-2 text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                    {r.status !== "Completed" ? (
-                      // Admin and staff (anyone with edit access, see
-                      // EditableSelect) can fix a wrongly chosen service at
-                      // any status except Completed. Outside the Draft inbox
-                      // it asks first, since the row is already being worked on.
-                      <EditableSelect
-                        width="w-36"
-                        value={r.service_id}
-                        options={serviceList.map((s) => ({ id: s.id, name: serviceLabel(s) }))}
-                        placeholder="Select Service"
-                        onSave={(v) => {
-                          if (!v || v === r.service_id) return;
-                          if (r.status !== "Draft Submitted" && !window.confirm(`Change service to "${serviceLabel(serviceList.find((x) => x.id === v))}"?`)) return;
-                          updateDealerOrService(r.id, "service_id", v, serviceList);
-                        }}
-                      />
-                    ) : (
-                      serviceLabel(r.services)
-                    )}
+                    {/* Service can no longer be changed from the table — it is
+                        edited inside the applicant's popup (Operational
+                        Details), and only while Amount is still empty. */}
+                    {serviceLabel(r.services)}
                   </td>
                 )}
                 {visibleCols.applicant && (
@@ -2892,6 +2886,17 @@ export default function Applications({ restricted = false, canEdit = true, canAp
           rtoList={rtoList}
           agencyList={agencyList}
           dealerList={dealerList}
+          serviceList={serviceList}
+          onChangeService={async (v) => {
+            if (!v || v === selected.service_id) return;
+            if (selected.status !== "Draft Submitted" && !window.confirm(`Change service to "${serviceLabel(serviceList.find((x) => x.id === v))}"?`)) return;
+            const ok = await updateDealerOrService(selected.id, "service_id", v, serviceList);
+            if (ok) {
+              const picked = serviceList.find((x) => x.id === v);
+              const extra = isPccRelatedService(picked) ? { rto_id: findPccRto(rtoList)?.id || null } : {};
+              setSelected((a) => (a ? { ...a, service_id: v, ...extra, services: picked || a.services } : a));
+            }
+          }}
           onChangeDealer={async (v) => {
             const ok = await updateDealerOrService(selected.id, "dealer_id", v, dealerList);
             if (ok) setSelected((s) => (s ? { ...s, dealer_id: v, dealers: dealerList.find((d) => d.id === v) || s.dealers } : s));
@@ -4302,7 +4307,7 @@ function RemarkPopup({ row, status, onCancel, onConfirm }) {
   );
 }
 
-function ApplicationDetailModal({ app, mode = "customer", staffList, restricted = false, canApprove = true, isAdmin = false, onlyDraft = false, rtoList = [], agencyList = [], dealerList = [], onChangeDealer, onClose, onStatusChange, onDelete, onAssign, onSaveAnswers, onSaveApplicant, onSaveField, onSaveAmount, onSavePccFee, onSaveAgencyFee, onSaveAgencyId, onDocsChanged }) {
+function ApplicationDetailModal({ app, mode = "customer", staffList, restricted = false, canApprove = true, isAdmin = false, onlyDraft = false, rtoList = [], agencyList = [], dealerList = [], serviceList = [], onChangeService, onChangeDealer, onClose, onStatusChange, onDelete, onAssign, onSaveAnswers, onSaveApplicant, onSaveField, onSaveAmount, onSavePccFee, onSaveAgencyFee, onSaveAgencyId, onDocsChanged }) {
   const [remarks, setRemarks] = useState(app.remarks || "");
   const [staffId, setStaffId] = useState(app.assigned_staff_id || "");
   const [staffIdentity, setStaffIdentity] = useState(null);
@@ -4458,6 +4463,26 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
   const OperationalDetailsCard = onSaveField ? (
     <Card title="Operational Details" className="mb-4">
       <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+        {onChangeService && (
+          <Field label="Service">
+            {app.status !== "Completed" && !(Number(app.amount) > 0) ? (
+              <EditableSelect
+                width="w-full"
+                value={app.service_id}
+                options={serviceList.map((s) => ({ id: s.id, name: serviceLabel(s) }))}
+                placeholder="Select Service"
+                onSave={onChangeService}
+              />
+            ) : (
+              <>
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-200 py-2">{serviceLabel(app.services)}</p>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {app.status === "Completed" ? "Completed — service locked." : "Amount bhara hai — service change nahi ho sakti."}
+                </p>
+              </>
+            )}
+          </Field>
+        )}
         <Field label="Application Date">
           <EditableCell
             width="w-full"

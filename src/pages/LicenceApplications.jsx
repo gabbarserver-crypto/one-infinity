@@ -84,8 +84,8 @@ function isClosedText(r) {
 //            -> Under Process (RTO fee unpaid) -> Pending (no number yet)
 //  DL:       Issued -> Hold -> Closed (reason typed + amount filled)
 //            -> Pending (amount not filled) -> Under Process (RTO fee unpaid)
-//            -> Waiting for Slot Booking (amount + RTO fee paid, no slot yet)
-//            -> Slot Pending (waits until the slot date)
+//            -> Waiting for Slot Booking (amount + RTO fee paid, slot not booked
+//               yet OR slot date still ahead)
 //            -> Waiting for RTO Approval (slot date is over)
 function bucketOf(r, isDl, today) {
   if (isIssued(r)) return "issued";
@@ -97,7 +97,7 @@ function bucketOf(r, isDl, today) {
     if (!feePaid(r)) return "process";
     if (!String(r.slot_time || "").trim()) return "slotbooking";
     const iso = slotISO(r.slot_time);
-    return iso && iso < today ? "approval" : "slotwait";
+    return iso && iso < today ? "approval" : "slotbooking";
   }
   return feePaid(r) ? "pending" : "process";
 }
@@ -108,7 +108,6 @@ const BUCKET_LABEL = {
   pending: "Pending",
   process: "Under Process",
   slotbooking: "Waiting for Slot Booking",
-  slotwait: "Slot Pending",
   approval: "Waiting for RTO Approval",
   hold: "Hold",
 };
@@ -118,12 +117,11 @@ const BUCKET_STYLE = {
   pending: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
   process: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
   slotbooking: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
-  slotwait: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
   approval: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
   hold: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
 };
 const FILTERS_LL = ["", "issued", "closed", "pending", "process", "hold"];
-const FILTERS_DL = ["", "issued", "closed", "pending", "slotbooking", "process", "slotwait", "approval", "hold"];
+const FILTERS_DL = ["", "issued", "closed", "pending", "slotbooking", "process", "approval", "hold"];
 
 function SortTh({ column, label, sortKey, sortDir, onSort }) {
   const active = sortKey === column;
@@ -158,7 +156,7 @@ function learningDownloadUrl(fileUrl) {
   }
 }
 
-function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
+function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true }) {
   const isDl = kind === "dl";
   const matcher = isDl ? DL_RE : LL_RE;
   const emptyText = isDl ? "No DL applications found." : "No Learning applications found.";
@@ -255,6 +253,22 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
   };
 
   const rtoName = (id) => rtoList.find((x) => x.id === id)?.name || "";
+
+  // DL page only: while LL/DL No. is still empty, RTO and Slot Date can be
+  // set/corrected right here. Once a number is typed, both lock.
+  const canEditRtoSlot = (r) => isDl && canEdit && !String(r.ll_dl_no || "").trim();
+  const saveRtoSlot = async (id, fields) => {
+    const { error: upErr } = await supabase.from("applications").update(fields).eq("id", id);
+    if (upErr) { setToast("Failed to update: " + upErr.message); return false; }
+    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...fields } : r)));
+    return true;
+  };
+  const saveSlot = async (r, raw) => {
+    const t = String(raw || "").trim();
+    if (t === String(r.slot_time || "")) return;
+    if (t && !slotISO(t)) { setToast("Slot date DD-MM-YYYY format me likhein"); return; }
+    await saveRtoSlot(r.id, { slot_time: t || null });
+  };
 
   const bucketOfRow = (r) => bucketOf(r, isDl, today);
   const countFor = (key) => (key === "" ? rows.length : rows.filter((r) => bucketOfRow(r) === key).length);
@@ -441,8 +455,35 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
                           </button>
                         ) : ""}
                       </td>
-                      {isDl && <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{rtoName(r.rto_id)}</td>}
-                      {isDl && <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{r.slot_time || ""}</td>}
+                      {isDl && (
+                        <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">
+                          {canEditRtoSlot(r) ? (
+                            <select
+                              value={r.rto_id || ""}
+                              onChange={(e) => saveRtoSlot(r.id, { rto_id: e.target.value || null })}
+                              className="w-40 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 px-2 py-1 text-sm"
+                            >
+                              <option value="">— Select RTO —</option>
+                              {rtoList.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                            </select>
+                          ) : rtoName(r.rto_id)}
+                        </td>
+                      )}
+                      {isDl && (
+                        <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">
+                          {canEditRtoSlot(r) ? (
+                            <input
+                              key={`${r.id}-${r.slot_time || ""}`}
+                              type="text"
+                              defaultValue={r.slot_time || ""}
+                              placeholder="DD-MM-YYYY"
+                              onBlur={(e) => saveSlot(r, e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                              className="w-28 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 px-2 py-1 text-sm"
+                            />
+                          ) : (r.slot_time || "")}
+                        </td>
+                      )}
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
                           <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${BUCKET_STYLE[bucket]}`}>{BUCKET_LABEL[bucket]}</span>

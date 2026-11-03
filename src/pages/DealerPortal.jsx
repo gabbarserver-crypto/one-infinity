@@ -1276,7 +1276,7 @@ function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, 
     setLoading(true);
     const { data, error } = await supabase
       .from("applications")
-      .select("id, draft_code, application_date, application_no, applicant_name, father_husband_name, date_of_birth, mobile, address, status, submitted_at, service_id, dealer_id, completed_at, source_application_id, ll_dl_no, pcc_no, pcc_status, pcc_stage, pcc_timeline, pcc_certificate_path, pcc_last_synced_at, pcc_not_required, service_answers, services(parent_service, short_name, chat_in_app, next_service_id, next_service_wait_days, pcc_required, ll_dl_no_required)")
+      .select("id, draft_code, application_date, application_no, applicant_name, father_husband_name, date_of_birth, mobile, address, status, submitted_at, amount, service_id, dealer_id, completed_at, source_application_id, ll_dl_no, pcc_no, pcc_status, pcc_stage, pcc_timeline, pcc_certificate_path, pcc_last_synced_at, pcc_not_required, service_answers, services(parent_service, short_name, chat_in_app, next_service_id, next_service_wait_days, pcc_required, ll_dl_no_required)")
       .eq("dealer_id", dealerId)
       .order("submitted_at", { ascending: false });
     if (error) {
@@ -1595,6 +1595,33 @@ function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, 
             <div>
               <p className="text-xs text-slate-400 dark:text-slate-500">Application No.</p>
               <p className="text-slate-700 dark:text-slate-300">{detailsApp.application_no || "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 dark:text-slate-500">Service</p>
+              {Number(detailsApp.amount) > 0 || detailsApp.status === "Completed" ? (
+                <p className="text-slate-700 dark:text-slate-300">{serviceLabel(detailsApp.services)}</p>
+              ) : (
+                <Select
+                  value={detailsApp.service_id || ""}
+                  onChange={async (e) => {
+                    const v = e.target.value;
+                    if (!v || v === detailsApp.service_id) return;
+                    const picked = serviceList.find((x) => x.id === v);
+                    if (!window.confirm(`Change service to "${serviceLabel(picked)}"?`)) return;
+                    const { error: svcErr } = await supabase.from("applications").update({ service_id: v }).eq("id", detailsApp.id).or("amount.is.null,amount.eq.0");
+                    if (svcErr) { setToast("Failed to change service: " + svcErr.message); return; }
+                    const patch = { service_id: v, services: { ...(detailsApp.services || {}), parent_service: picked?.parent_service, short_name: picked?.short_name } };
+                    setDetailsApp((a) => ({ ...a, ...patch }));
+                    setRows((rs) => rs.map((r) => (r.id === detailsApp.id ? { ...r, ...patch } : r)));
+                    setToast("Service changed");
+                  }}
+                >
+                  {serviceList.map((x) => <option key={x.id} value={x.id}>{serviceLabel(x)}</option>)}
+                </Select>
+              )}
+              {!(Number(detailsApp.amount) > 0) && detailsApp.status !== "Completed" && (
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Amount fill hone ke baad service change nahi hogi.</p>
+              )}
             </div>
           </div>
         </Modal>
