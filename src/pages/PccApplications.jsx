@@ -36,9 +36,18 @@ const PCC_CHECK_URL = `${import.meta.env.VITE_PCC_STATUS_API_BASE || SERVER_API_
 // A couple of portal lookups at a time — fast enough, still polite to the
 // Delhi Police site (the server-side cron sync is fully sequential).
 const CHECK_CONCURRENCY = 2;
-// Never re-checked: Certificate Issued is final, Police Case is manual-only
-// (matches the server sync, which never overwrites Police Case).
-const SKIP_STATUSES = new Set(["Certificate Issued", "Police Case"]);
+// The bulk "Check all PCC status" only looks up applications that are still
+// Under Verification (or have a PCC No but no status yet). Certificate Issued,
+// Rejected and Police Case rows are final here and never re-checked.
+const CHECKABLE_STATUSES = new Set(["", "Under Verification"]);
+
+// A row counts as "new" (pinned on top + NEW badge) for this long after it
+// turned to Certificate Issued.
+const NEW_ISSUED_DAYS = 3;
+function isNewlyIssued(r) {
+  if (r.pcc_status !== "Certificate Issued" || !r.pcc_issued_at) return false;
+  return Date.now() - Date.parse(r.pcc_issued_at) < NEW_ISSUED_DAYS * 86400000;
+}
 
 // Two kinds of PCC numbers are stored here:
 //  - Drafted: 14 digits (e.g. 20261030619207) — created when the PCC is only
@@ -276,14 +285,14 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
       setLoading(true);
       setError("");
       const SELECT_COLS =
-        "id, draft_code, application_date, submitted_at, amount, status, applicant_name, father_husband_name, application_no, ll_dl_no, pcc_no, pcc_status, pcc_stage, pcc_certificate_path, pcc_not_required, remarks, pcc_timeline, rto_id, dealers(name,code,short_name), services(parent_service,short_name,pcc_required,ll_dl_no_required)";
+        "id, draft_code, pcc_issued_at, application_date, submitted_at, amount, status, applicant_name, father_husband_name, application_no, ll_dl_no, pcc_no, pcc_status, pcc_stage, pcc_certificate_path, pcc_not_required, remarks, pcc_timeline, rto_id, dealers(name,code,short_name), services(parent_service,short_name,pcc_required,ll_dl_no_required)";
       const [{ data: rt }, res, withNo] = await Promise.all([
         supabase.from("rtos").select("id, name, code, type").order("name"),
         fetchAllRows(() =>
           supabase
             .from("applications")
             .select(
-              "id, draft_code, application_date, submitted_at, amount, status, applicant_name, father_husband_name, application_no, ll_dl_no, pcc_no, pcc_status, pcc_stage, pcc_certificate_path, pcc_not_required, remarks, pcc_timeline, rto_id, dealers(name,code,short_name), services!inner(parent_service,short_name,pcc_required,ll_dl_no_required)"
+              "id, draft_code, pcc_issued_at, application_date, submitted_at, amount, status, applicant_name, father_husband_name, application_no, ll_dl_no, pcc_no, pcc_status, pcc_stage, pcc_certificate_path, pcc_not_required, remarks, pcc_timeline, rto_id, dealers(name,code,short_name), services!inner(parent_service,short_name,pcc_required,ll_dl_no_required)"
             )
             .eq("services.pcc_required", true)
             .order("submitted_at", { ascending: false })
@@ -387,7 +396,13 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
   const sorted = useMemo(() => {
     const get = accessors[sortKey] || accessors.date;
     const dir = sortDir === "asc" ? 1 : -1;
+    const pin = sortKey === "date" && sortDir === "desc"; // untouched default sort
     return [...filtered].sort((a, b) => {
+      if (pin) {
+        const an = isNewlyIssued(a), bn = isNewlyIssued(b);
+        if (an !== bn) return an ? -1 : 1;
+        if (an && bn) return Date.parse(b.pcc_issued_at) - Date.parse(a.pcc_issued_at);
+      }
       const av = get(a);
       const bv = get(b);
       if (av < bv) return -1 * dir;
@@ -420,7 +435,7 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
 
   // Rows the bulk check will actually look up.
   const checkable = useMemo(
-    () => pccRows.filter((r) => r.pcc_no && !isDraftPcc(r.pcc_no) && !SKIP_STATUSES.has(r.pcc_status)),
+    () => pccRows.filter((r) => r.pcc_no && !isDraftPcc(r.pcc_no) && CHECKABLE_STATUSES.has(r.pcc_status || "")),
     [pccRows]
   );
   const running = checkProgress !== null;
@@ -430,7 +445,7 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
     const skipped = pccRows.filter((r) => r.pcc_no && !isDraftPcc(r.pcc_no)).length - checkable.length;
     const ok = window.confirm(
       `Check PCC status for ${checkable.length} application${checkable.length === 1 ? "" : "s"} on the Delhi Police portal?` +
-      (skipped > 0 ? `\n\n(${skipped} already Certificate Issued / Police Case will be skipped.)` : "") +
+      (skipped > 0 ? `\n\n(${skipped} already Certificate Issued / Rejected / Police Case will be skipped.)` : "") +
       "\n\nThis can take a few minutes — keep this page open."
     );
     if (!ok) return;
@@ -453,9 +468,13 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
           if (!updates) {
             unchanged += 1; // portal had no progress timeline yet
           } else {
+            const becameIssued = updates.pcc_status === "Certificate Issued" && row.pcc_status !== "Certificate Issued";
             if (updates.pcc_status && updates.pcc_status !== row.pcc_status) changed += 1;
             else unchanged += 1;
-            setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, ...updates } : r)));
+            // The database trigger stamps pcc_issued_at; mirror it locally so
+            // the row jumps to the top without a reload.
+            const local = becameIssued ? { ...updates, pcc_issued_at: new Date().toISOString() } : updates;
+            setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, ...local } : r)));
           }
         } catch (e) {
           failures.push({ draft: row.draft_code, name: row.applicant_name, pcc: row.pcc_no, message: e?.message || "Failed" });
@@ -500,7 +519,7 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
   // modal, mirror it onto the Documents "CERTIFICATE" row.
   const onCertificateSaved = async (id) => {
     const path = `pcc-certificates/${id}.pdf`;
-    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, pcc_certificate_path: path, pcc_stage: "Certificate Issued", pcc_status: "Certificate Issued" } : r)));
+    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, pcc_certificate_path: path, pcc_stage: "Certificate Issued", pcc_status: "Certificate Issued", pcc_issued_at: r.pcc_status === "Certificate Issued" ? r.pcc_issued_at : new Date().toISOString() } : r)));
     const { data: docRow } = await supabase
       .from("application_documents")
       .select("id")
@@ -815,6 +834,9 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
+                          {isNewlyIssued(r) && (
+                            <span className="rounded bg-green-600 text-white text-[10px] font-bold px-1.5 py-0.5" title={`Issued ${new Date(r.pcc_issued_at).toLocaleString()}`}>NEW</span>
+                          )}
                           <StatusBadge status={r.status} />
                           {stage && <span className={`text-[11px] font-medium whitespace-nowrap ${stageTextClass(r)}`}>{stage}</span>}
                         </div>
@@ -852,7 +874,11 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
           requireGuardian
           onClose={() => setPccCheckRow(null)}
           onStatusSynced={(id, updates) =>
-            setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...updates } : r)))
+            setRows((rs) => rs.map((r) => {
+              if (r.id !== id) return r;
+              const becameIssued = updates.pcc_status === "Certificate Issued" && r.pcc_status !== "Certificate Issued";
+              return { ...r, ...updates, ...(becameIssued ? { pcc_issued_at: new Date().toISOString() } : {}) };
+            }))
           }
           onCertificateSaved={onCertificateSaved}
         />

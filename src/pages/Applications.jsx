@@ -2497,13 +2497,21 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                 )}
                 {visibleCols.service && (
                   <td className="px-3 py-2 text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                    {r.status === "Draft Submitted" ? (
+                    {r.status !== "Completed" ? (
+                      // Admin and staff (anyone with edit access, see
+                      // EditableSelect) can fix a wrongly chosen service at
+                      // any status except Completed. Outside the Draft inbox
+                      // it asks first, since the row is already being worked on.
                       <EditableSelect
                         width="w-36"
                         value={r.service_id}
                         options={serviceList.map((s) => ({ id: s.id, name: serviceLabel(s) }))}
                         placeholder="Select Service"
-                        onSave={(v) => v && updateDealerOrService(r.id, "service_id", v, serviceList)}
+                        onSave={(v) => {
+                          if (!v || v === r.service_id) return;
+                          if (r.status !== "Draft Submitted" && !window.confirm(`Change service to "${serviceLabel(serviceList.find((x) => x.id === v))}"?`)) return;
+                          updateDealerOrService(r.id, "service_id", v, serviceList);
+                        }}
                       />
                     ) : (
                       serviceLabel(r.services)
