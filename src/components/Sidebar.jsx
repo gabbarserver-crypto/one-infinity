@@ -23,6 +23,8 @@ import {
   Palette,
   Check,
   ShieldCheck,
+  GraduationCap,
+  CreditCard,
 } from "lucide-react";
 
 // Maps each NAV key from App.jsx to an icon. Keep in sync if pages are added/removed.
@@ -34,6 +36,8 @@ const ICONS = {
   staffDraftApplications: Inbox,
   draftApplications: Inbox,
   pccApplications: ShieldCheck,
+  learningApplications: GraduationCap,
+  dlApplications: CreditCard,
   chats: MessageSquare,
   masters: Database,
   payments: Receipt,

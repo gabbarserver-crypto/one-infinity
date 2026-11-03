@@ -14,8 +14,9 @@ import Dashboard from "./pages/Dashboard";
 import Applications, { StaffApplications, StaffDraftApplications, DraftApplications } from "./pages/Applications";
 import ApplicationExcel from "./pages/ApplicationExcel";
 import PccApplications from "./pages/PccApplications";
+import { LearningApplications, DlApplications } from "./pages/LicenceApplications";
 import Payments from "./pages/Payments";
-import Ledger from "./pages/Ledger";import Reports from "./pages/Reports";
+import Ledger from "./pages/Ledger";
 import Masters from "./pages/Masters";
 import Settings from "./pages/Settings";
 import Chats from "./pages/Chats";
@@ -69,13 +70,14 @@ const NAV = [
   { key: "staffDraftApplications", label: "Draft", Component: StaffDraftApplications },
   { key: "draftApplications", label: "Draft", Component: DraftApplications },
   { key: "pccApplications", label: "PCC", Component: PccApplications },
+  { key: "learningApplications", label: "Learning", Component: LearningApplications },
+  { key: "dlApplications", label: "DL", Component: DlApplications },
   { key: "chats", label: "Call/Chat", Component: Chats },
   { key: "masters", label: "Masters", Component: Masters },
   { key: "payments", label: "Payments", Component: Payments },
   { key: "ledger", label: "Ledger", Component: Ledger },
   { key: "dealerLedger", label: "Dealer", Component: DealerLedgerPage },
   { key: "agencyLedger", label: "Agency", Component: AgencyLedgerPage },
-  { key: "reports", label: "Reports", Component: Reports },
   { key: "settings", label: "Settings", Component: Settings },
 ];
 
@@ -101,13 +103,16 @@ const MODULE_BY_NAV_KEY = {
   // Staff View (see visibleNav below). Read-only, so this module is only used
   // for the edit/approve flags, which the page ignores.
   pccApplications: "applications",
+  // Same rule as PCC: read-only lists for anyone who can view Applications
+  // or the restricted Staff View.
+  learningApplications: "applications",
+  dlApplications: "applications",
   chats: "chats",
   masters: "masters",
   payments: "payments",
   ledger: "ledger",
   dealerLedger: "ledger",
   agencyLedger: "ledger",
-  reports: "reports",
   settings: "settings",
 };
 
@@ -182,7 +187,7 @@ export default function App() {
     if (isAdmin) return NAV.filter((n) => n.key !== "staffApplications" && n.key !== "staffDraftApplications");
     return NAV.filter((n) => {
       if (n.key === "applicationExcel") return false;
-      if (n.key === "pccApplications") return !!(permMap.applications?.can_view || permMap.staffApplications?.can_view);
+      if (n.key === "pccApplications" || n.key === "learningApplications" || n.key === "dlApplications") return !!(permMap.applications?.can_view || permMap.staffApplications?.can_view);
       return permMap[MODULE_BY_NAV_KEY[n.key]]?.can_view;
     });
   }, [staff, isAdmin, permMap]);
