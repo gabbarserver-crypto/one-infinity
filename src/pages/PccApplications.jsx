@@ -13,7 +13,7 @@ import { todayIST } from "../lib/dates";
 import { SERVER_API_BASE } from "../lib/serverApi";
 import PCCStatusCheckModal, { normalizePccApplicationNumber, stripKinPrefix, persistPccStatus, getPccRejectReason } from "../components/PCCStatusCheckModal";
 import * as XLSX from "xlsx";
-import { ArrowUp, ArrowDown, ArrowUpDown, RefreshCw, Pencil, Download, Loader2, Upload } from "lucide-react";
+import { ArrowUp, ArrowDown, ArrowUpDown, RefreshCw, Pencil, Download, Loader2, Upload, Ban } from "lucide-react";
 import {
   PCC_STATUS_STYLES,
   getProcessingStage,
@@ -334,6 +334,8 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
   const pccRows = useMemo(
     () => rows.filter((r) => {
       if (rowDateISO(r) < MIN_DATE_ISO) return false;
+      // Marked "PCC Not Required" -> off this list, whatever else matches.
+      if (r.pcc_not_required) return false;
       // PCC due (needed, not marked "not required", no PCC No yet), whatever the RTO.
       if (isPccDue(r)) return true;
       // A PCC No plus RTO explicitly set to PCC (e.g. CVR / CVR A rows whose
@@ -503,6 +505,25 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
       .eq("id", row.id);
     if (err) throw err;
     setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, father_husband_name: name } : r)));
+  };
+
+  // "Mark as Not Required": same pcc_not_required flag the Applications page's
+  // PCC popup sets. The row leaves this list straight away; it can be undone
+  // from that popup on the Applications page.
+  const markNotRequired = async (row) => {
+    const ok = window.confirm(
+      `Mark PCC as NOT required for ${row.applicant_name || row.draft_code}?` +
+      (row.pcc_no ? `\n\nThis application has PCC No ${row.pcc_no}.` : "") +
+      "\n\nIt will be removed from this list."
+    );
+    if (!ok) return;
+    const { error: err } = await supabase.from("applications").update({ pcc_not_required: true }).eq("id", row.id);
+    if (err) {
+      setRowNotice({ ok: false, text: `${row.draft_code}: couldn't mark as Not Required — ${err.message}` });
+      return;
+    }
+    setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, pcc_not_required: true } : r)));
+    setRowNotice({ ok: true, text: `${row.draft_code} marked PCC Not Required and removed from this list.` });
   };
 
   const checkRowPcc = (row) => {
@@ -831,6 +852,14 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
                         ) : (
                           <span className="text-slate-300 dark:text-slate-600">—</span>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => markNotRequired(r)}
+                          title="Mark PCC as Not Required (removes this row from the list)"
+                          className="ml-2 inline-flex items-center gap-1 rounded border border-slate-300 dark:border-slate-700 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400 hover:border-rose-400 hover:text-rose-500"
+                        >
+                          <Ban size={10} /> Not required
+                        </button>
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
