@@ -9,14 +9,12 @@
 // (Staff View)" tab — same rule as the PCC page.
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { Card, StatusBadge, GhostButton } from "../components/UI";
+import { Card, GhostButton } from "../components/UI";
 import { fetchAllRows } from "../lib/fetchAll";
 import { todayIST } from "../lib/dates";
 import * as XLSX from "xlsx";
 import { ArrowUp, ArrowDown, ArrowUpDown, Download } from "lucide-react";
 import {
-  getProcessingStage,
-  stageTextClass,
   serviceLabel,
   dealerLabel,
   isoToDDMMYYYY,
@@ -39,6 +37,64 @@ function rowDateISO(r) {
   if (r.submitted_at) return todayIST(new Date(r.submitted_at));
   return "";
 }
+
+// Parse the free-text Slot field (usually DD-MM-YYYY) into an ISO date.
+function slotISO(v) {
+  const t = String(v || "").trim();
+  if (!t) return null;
+  let m = t.match(/(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  m = t.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  return "";
+}
+
+// LL/DL No. counts as issued only when it holds a real number (has digits) —
+// a plain remark like "ALREADY DL" is not an issued licence.
+function isIssued(r) {
+  return /\d/.test(String(r.ll_dl_no || ""));
+}
+function feePaid(r) {
+  return Number(r.rto_fee) > 0;
+}
+
+// One bucket per application, checked top to bottom.
+//  Learning: Issued -> Hold -> Under Process (RTO fee unpaid) -> Pending (no number yet)
+//  DL:       Issued -> Hold -> Waiting for Slot Booking (no slot yet)
+//            -> Under Process (RTO fee unpaid) -> Slot Pending (waits until the
+//            slot date) -> Waiting for RTO Approval (slot date is over)
+function bucketOf(r, isDl, today) {
+  if (isIssued(r)) return "issued";
+  if (r.status === "On Hold") return "hold";
+  if (isDl) {
+    if (!String(r.slot_time || "").trim()) return "slotbooking";
+    if (!feePaid(r)) return "process";
+    const iso = slotISO(r.slot_time);
+    return iso && iso < today ? "approval" : "slotwait";
+  }
+  return feePaid(r) ? "pending" : "process";
+}
+
+const BUCKET_LABEL = {
+  issued: "Issued",
+  pending: "Pending",
+  process: "Under Process",
+  slotbooking: "Waiting for Slot Booking",
+  slotwait: "Slot Pending",
+  approval: "Waiting for RTO Approval",
+  hold: "Hold",
+};
+const BUCKET_STYLE = {
+  issued: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+  pending: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
+  process: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+  slotbooking: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
+  slotwait: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
+  approval: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
+  hold: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
+};
+const FILTERS_LL = ["", "issued", "pending", "process", "hold"];
+const FILTERS_DL = ["", "issued", "slotbooking", "process", "slotwait", "approval", "hold"];
 
 function SortTh({ column, label, sortKey, sortDir, onSort }) {
   const active = sortKey === column;
@@ -72,6 +128,8 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
   const [sortKey, setSortKey] = useState("date");
   const [sortDir, setSortDir] = useState("desc");
   const [page, setPage] = useState(1);
+  const [filter, setFilter] = useState("");
+  const today = todayIST();
 
   // Staff with only the restricted Staff View never see Amount.
   const showAmount = isAdmin || visibleNav.some((n) => n.key === "applications");
@@ -111,15 +169,19 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
 
   const rtoName = (id) => rtoList.find((x) => x.id === id)?.name || "";
 
+  const bucketOfRow = (r) => bucketOf(r, isDl, today);
+  const countFor = (key) => (key === "" ? rows.length : rows.filter((r) => bucketOfRow(r) === key).length);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
+    const base = filter ? rows.filter((r) => bucketOfRow(r) === filter) : rows;
+    if (!q) return base;
+    return base.filter((r) =>
       [r.draft_code, r.applicant_name, r.application_no, r.ll_dl_no, dealerLabel(r.dealers), serviceLabel(r.services), rtoName(r.rto_id), r.slot_time]
         .some((v) => String(v || "").toLowerCase().includes(q))
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, search, rtoList]);
+  }, [rows, search, rtoList, filter, today]);
 
   const accessors = {
     draft: (r) => r.draft_code || "",
@@ -133,7 +195,7 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
     lldl: (r) => r.ll_dl_no || "",
     rto: (r) => rtoName(r.rto_id).toLowerCase(),
     slot: (r) => r.slot_time || "",
-    status: (r) => getProcessingStage(r) || r.status || "",
+    status: (r) => BUCKET_LABEL[bucketOfRow(r)] || "",
   };
 
   const sorted = useMemo(() => {
@@ -147,9 +209,10 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
       return 0;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, sortKey, sortDir, rtoList]);
+  }, [filtered, sortKey, sortDir, rtoList, today]);
 
-  useEffect(() => { setPage(1); }, [search, sortKey, sortDir, kind]);
+  useEffect(() => { setFilter(""); }, [kind]);
+  useEffect(() => { setPage(1); }, [search, sortKey, sortDir, kind, filter]);
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -179,7 +242,7 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
       r.rto_fee ?? "",
       r.ll_dl_no || "",
       ...(isDl ? [rtoName(r.rto_id), r.slot_time || ""] : []),
-      getProcessingStage(r) || r.status || "",
+      BUCKET_LABEL[bucketOfRow(r)] || "",
     ]);
     const ws = XLSX.utils.aoa_to_sheet([head, ...body]);
     const wb = XLSX.utils.book_new();
@@ -191,6 +254,22 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
 
   return (
     <div>
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        {(isDl ? FILTERS_DL : FILTERS_LL).map((key) => (
+          <button
+            key={key || "all"}
+            onClick={() => setFilter(key)}
+            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+              filter === key
+                ? "bg-blue-600 text-white border-blue-600"
+                : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-slate-400"
+            }`}
+          >
+            {key ? BUCKET_LABEL[key] : "All"} <span className="opacity-70">{countFor(key)}</span>
+          </button>
+        ))}
+      </div>
+
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <input
           type="text"
@@ -231,7 +310,7 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
                 <tr><td colSpan={colCount} className="px-3 py-8 text-center text-slate-400 dark:text-slate-500">{emptyText}</td></tr>
               ) : (
                 pageRows.map((r) => {
-                  const stage = getProcessingStage(r);
+                  const bucket = bucketOfRow(r);
                   return (
                     <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50/60 dark:hover:bg-slate-800/30">
                       <td className="px-3 py-2 whitespace-nowrap font-semibold text-blue-600 dark:text-blue-400">{r.draft_code}</td>
@@ -247,8 +326,7 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [] }) {
                       {isDl && <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{r.slot_time || ""}</td>}
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
-                          <StatusBadge status={r.status} />
-                          {stage && <span className={`text-[11px] font-medium whitespace-nowrap ${stageTextClass(r)}`}>{stage}</span>}
+                          <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${BUCKET_STYLE[bucket]}`}>{BUCKET_LABEL[bucket]}</span>
                         </div>
                       </td>
                     </tr>

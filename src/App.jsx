@@ -12,7 +12,6 @@ import Welcome from "./pages/Welcome";
 import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import Applications, { StaffApplications, StaffDraftApplications, DraftApplications } from "./pages/Applications";
-import ApplicationExcel from "./pages/ApplicationExcel";
 import PccApplications from "./pages/PccApplications";
 import { LearningApplications, DlApplications } from "./pages/LicenceApplications";
 import Payments from "./pages/Payments";
@@ -65,7 +64,6 @@ function AgencyLedgerPage({ initialEntityId, isAdmin }) { return <Ledger only="a
 const NAV = [
   { key: "dashboard", label: "Dashboard", Component: Dashboard },
   { key: "applications", label: "Applications", Component: Applications },
-  { key: "applicationExcel", label: "Application Excel", Component: ApplicationExcel },
   { key: "staffApplications", label: "Applications", Component: StaffApplications },
   { key: "staffDraftApplications", label: "Draft", Component: StaffDraftApplications },
   { key: "draftApplications", label: "Draft", Component: DraftApplications },
