@@ -496,15 +496,15 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
             <button
               type="button"
               onClick={toggleHideCodes}
-              title="Hide Draft No & Entry Code — handy for a clean screenshot to send to a dealer"
+              title="Hide Draft No, Entry Code & Delete — handy for a clean screenshot to send to a dealer"
               className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:border-blue-400 hover:text-blue-600"
             >
-              {hideCodes ? "Show Draft No & Entry Code" : "Hide Draft No & Entry Code"}
+              {hideCodes ? "Show Draft No, Entry Code & Delete" : "Hide Draft No, Entry Code & Delete"}
             </button>
           </div>
           <div className="grid sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-5">
             <Card>
-              <p className="text-xs text-slate-400 dark:text-slate-500">Running Balance</p>
+              <p className="text-xs text-slate-400 dark:text-slate-500">Balance</p>
               <p className="text-xl font-bold text-slate-800 dark:text-slate-100 mt-1">₹{Number(runningBalance || 0).toLocaleString("en-IN")}</p>
               {loadError && <p className="text-[11px] text-amber-600 mt-1">Error loading ledger: {loadError}</p>}
             </Card>
@@ -531,7 +531,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
           </div>
 
           {draftBalanceById && (
-            <p className="no-print text-xs text-slate-400 dark:text-slate-500 mb-2">Running Balance Draft No order ke hisaab se dikh raha hai.</p>
+            <p className="no-print text-xs text-slate-400 dark:text-slate-500 mb-2">Balance Draft No order ke hisaab se dikh raha hai.</p>
           )}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-x-auto">
             <table className="m-scroll w-full text-sm">
@@ -544,8 +544,8 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
                   <SortableTh label="Name" sortKeyName="display_name" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <SortableTh label="Debit" sortKeyName="debit" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
                   <SortableTh label="Credit" sortKeyName="credit" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
-                  <SortableTh label="Running Balance" sortKeyName="running_balance" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
-                  {isAdmin && <th className="px-3 py-2 text-right">Actions</th>}
+                  <SortableTh label="Balance" sortKeyName="running_balance" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
+                  {isAdmin && !hideCodes && <th className="px-3 py-2 text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -614,7 +614,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
                     <td className={`px-3 py-2 text-right font-semibold whitespace-nowrap ${r.running_balance < 0 ? "text-rose-600" : "text-slate-700 dark:text-slate-300"}`}>
                       ₹{Number(r.running_balance).toLocaleString("en-IN")}
                     </td>
-                    {isAdmin && (
+                    {isAdmin && !hideCodes && (
                       <td className="px-3 py-2 text-right whitespace-nowrap">
                         <button
                           type="button"
@@ -630,7 +630,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
                   </tr>
                 ))}
                 {periodRows.length === 0 && (
-                  <tr><td colSpan={(isAdmin ? 8 : 7) - (hideCodes ? 2 : 0)} className="text-center text-slate-400 dark:text-slate-500 py-8">No transactions yet</td></tr>
+                  <tr><td colSpan={hideCodes ? 5 : (isAdmin ? 8 : 7)} className="text-center text-slate-400 dark:text-slate-500 py-8">No transactions yet</td></tr>
                 )}
               </tbody>
             </table>
