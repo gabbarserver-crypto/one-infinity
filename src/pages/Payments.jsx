@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { Card, Field, Input, Select, PrimaryButton, GhostButton, DangerButton, Modal, Toast } from "../components/UI";
-import SearchableSelect from "../components/SearchableSelect";
+import SearchableSelect, { dealerOptionLabel } from "../components/SearchableSelect";
 import StaffQrSendPanel from "../components/StaffQrSendPanel";
 import { parseCSV, findByLabel, ddmmyyyyToISO } from "../lib/csv";
 import { fmtDate } from "../lib/dates";
@@ -50,7 +50,7 @@ export default function Payments({ staff } = {}) {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.from("dealers").select("id, name, code, mobile");
+      const { data } = await supabase.from("dealers").select("id, name, code, short_name, mobile");
       setDealers(data || []);
       const { data: a } = await supabase.from("agencies").select("id, name, code");
       setAgencies(a || []);
@@ -574,7 +574,7 @@ export default function Payments({ staff } = {}) {
                 <SearchableSelect
                   value={form.dealer_id}
                   onChange={(id) => setForm((s) => ({ ...s, dealer_id: id }))}
-                  options={dealers.map((d) => ({ id: d.id, name: `${d.name} (${d.code})` }))}
+                  options={dealers.map((d) => ({ id: d.id, name: dealerOptionLabel(d, true) }))}
                   placeholder="Type to search dealer…"
                 />
               </Field>
@@ -583,7 +583,7 @@ export default function Payments({ staff } = {}) {
                   <SearchableSelect
                     value={form.to_dealer_id}
                     onChange={(id) => setForm((s) => ({ ...s, to_dealer_id: id }))}
-                    options={dealers.filter((d) => d.id !== form.dealer_id).map((d) => ({ id: d.id, name: `${d.name} (${d.code})` }))}
+                    options={dealers.filter((d) => d.id !== form.dealer_id).map((d) => ({ id: d.id, name: dealerOptionLabel(d, true) }))}
                     placeholder="Type to search dealer…"
                   />
                 </Field>
@@ -1414,7 +1414,7 @@ function EditTransferModal({ transfer, dealers, onClose, onSave }) {
     remarks: transfer.remarks || "",
   });
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
-  const opts = dealers.map((d) => ({ id: d.id, name: `${d.name} (${d.code})` }));
+  const opts = dealers.map((d) => ({ id: d.id, name: dealerOptionLabel(d, true) }));
 
   return (
     <Modal title={`Edit Transfer — ${transfer.from_dealer} → ${transfer.to_dealer}`} onClose={onClose}>

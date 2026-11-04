@@ -5,7 +5,7 @@ import { Card, StatusBadge, PrimaryButton, GhostButton, DangerButton, Field, Inp
 import ChatPanel from "../components/ChatPanel";
 import ApplicationChatModal from "../components/ApplicationChatModal";
 import { chatUnreadSummary } from "../lib/serverApi";
-import SearchableSelect from "../components/SearchableSelect";
+import SearchableSelect, { dealerOptionLabel } from "../components/SearchableSelect";
 import { parseCSV, findByLabel } from "../lib/csv";
 import * as XLSX from "xlsx";
 import BookAppointmentModal from "../components/BookAppointmentModal";
@@ -2312,10 +2312,12 @@ export default function Applications({ restricted = false, canEdit = true, canAp
       {showFilters && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl dark:bg-slate-900 dark:border-slate-800 p-4 mb-4 grid sm:grid-cols-2 md:grid-cols-4 gap-3">
           {!restricted && (
-            <Select value={filterDealer} onChange={(e) => setFilterDealer(e.target.value)}>
-              <option value="">All Dealers</option>
-              {dealerList.map((d) => <option key={d.id} value={d.id}>{dealerLabel(d)}</option>)}
-            </Select>
+            <SearchableSelect
+              value={filterDealer}
+              options={[{ id: "", name: "All Dealers" }, ...dealerList.map((d) => ({ id: d.id, name: dealerOptionLabel(d) }))]}
+              onChange={(id) => setFilterDealer(id)}
+              placeholder="All Dealers — type to search…"
+            />
           )}
           <Select value={filterService} onChange={(e) => setFilterService(e.target.value)}>
             <option value="">All Services</option>
@@ -4125,10 +4127,12 @@ function NewApplicationModal({ dealerList, serviceList, onClose, onCreate }) {
       </p>
       <div className="grid sm:grid-cols-2 gap-x-4">
         <Field label="Dealer" required>
-          <Select value={form.dealer_id} onChange={set("dealer_id")}>
-            <option value="">Select Dealer</option>
-            {dealerList.map((d) => <option key={d.id} value={d.id}>{dealerLabel(d)}</option>)}
-          </Select>
+          <SearchableSelect
+            value={form.dealer_id}
+            options={dealerList.map((d) => ({ id: d.id, name: dealerOptionLabel(d) }))}
+            onChange={(id) => setForm((s) => ({ ...s, dealer_id: id }))}
+            placeholder="Type short / full name…"
+          />
         </Field>
         <Field label="Service" required>
           <SearchableSelect
@@ -4673,14 +4677,14 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
           <span className="flex items-center gap-1.5">
             <span className="font-semibold text-slate-500 dark:text-slate-400">Dealer:</span>
             {isAdmin && onChangeDealer ? (
-              <select
-                value={app.dealer_id || ""}
-                onChange={(e) => e.target.value && e.target.value !== app.dealer_id && window.confirm("Change dealer for this application? Its ledger charge will move to the new dealer.") && onChangeDealer(e.target.value)}
-                title="Change dealer (Admin only)"
-                className="max-w-[14rem] rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 px-1.5 py-1 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-blue-400"
-              >
-                {dealerList.map((d) => <option key={d.id} value={d.id}>{dealerLabel(d)}</option>)}
-              </select>
+              <div className="w-64" title="Change dealer (Admin only)">
+                <SearchableSelect
+                  value={app.dealer_id || ""}
+                  options={dealerList.map((d) => ({ id: d.id, name: dealerOptionLabel(d) }))}
+                  onChange={(id) => id && id !== app.dealer_id && window.confirm("Change dealer for this application? Its ledger charge will move to the new dealer.") && onChangeDealer(id)}
+                  placeholder="Type to search dealer…"
+                />
+              </div>
             ) : (
               <span className="font-bold">{dealerLabel(app.dealers) || "—"}</span>
             )}

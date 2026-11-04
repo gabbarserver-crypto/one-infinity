@@ -4,6 +4,17 @@ import React, { useEffect, useRef, useState } from "react";
 // anywhere in the label (not just from the start). Used for the Service
 // picker in "New Application" (both admin and dealer side) where the list
 // can run to 30+ entries and scrolling a plain <select> is slow.
+// "SHORT — Full Name (CODE)" so a dealer can be found by typing either the
+// short name, the full name or the code.
+export function dealerOptionLabel(d, withCode = false) {
+  if (!d) return "";
+  const short = (d.short_name || "").trim();
+  const full = (d.name || "").trim();
+  let label = short && full && short.toLowerCase() !== full.toLowerCase() ? `${short} — ${full}` : (full || short);
+  if (withCode && d.code) label += ` (${d.code})`;
+  return label;
+}
+
 export default function SearchableSelect({ value, options, onChange, placeholder = "Select…" }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -28,7 +39,15 @@ export default function SearchableSelect({ value, options, onChange, placeholder
         type="text"
         value={open ? query : selected?.name || ""}
         onFocus={() => { setOpen(true); setQuery(""); }}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            if (filtered[0]) { onChange(filtered[0].id); setOpen(false); setQuery(""); e.currentTarget.blur(); }
+          } else if (e.key === "Escape") {
+            setOpen(false); e.currentTarget.blur();
+          }
+        }}
         placeholder={placeholder}
         className="w-full rounded-lg border border-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40"
       />

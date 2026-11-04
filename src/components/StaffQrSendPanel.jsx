@@ -18,7 +18,7 @@ import { createPaymentQr, sendPush } from "../lib/serverApi";
 import { getOrCreateThread, sendMessage, identityFor } from "../lib/chat";
 import { buildPayLink } from "../lib/cashfreeCheckout";
 import { Modal, Field, Input, Select, PrimaryButton, GhostButton, Toast } from "./UI";
-import SearchableSelect from "./SearchableSelect";
+import SearchableSelect, { dealerOptionLabel } from "./SearchableSelect";
 
 // Cashfree requires order_expiry_time to be more than 15 minutes out, so
 // this must stay above 15 -- 10 used to be the default and silently failed
@@ -247,7 +247,7 @@ export default function StaffQrSendPanel({ staff, dealers, onClose }) {
             <SearchableSelect
               value={dealerId}
               onChange={(id) => { setDealerId(id); setApplicationId(""); }}
-              options={dealers.map((d) => ({ id: d.id, name: `${d.name} (${d.code})` }))}
+              options={dealers.map((d) => ({ id: d.id, name: dealerOptionLabel(d, true) }))}
               placeholder="Type to search dealer…"
             />
           </Field>
