@@ -135,6 +135,14 @@ export default function QrPaymentPanel({ dealerId, onClose, onPaid }) {
           ) : (
             <p className="text-sm text-rose-500">QR image unavailable — try again in a moment.</p>
           )}
+          {qr.qrImageUrl && qr.paymentSessionId && (
+            <div>
+              <GhostButton onClick={openHosted} disabled={openingHosted} className="w-full">
+                {openingHosted ? "Opening…" : "Card / Netbanking / UPI app se pay karein"}
+              </GhostButton>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Cashfree ka payment page naye tab me khulega. Payment hote hi yahan apne aap confirm ho jayega.</p>
+            </div>
+          )}
           <p className="text-2xl font-bold text-slate-700 dark:text-slate-200">₹{Number(amount).toLocaleString("en-IN")}</p>
           <p className={`text-sm font-mono ${secondsLeft <= 30 ? "text-rose-500" : "text-slate-400"}`}>
             Expires in {mm}:{ss}
