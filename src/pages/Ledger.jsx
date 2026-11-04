@@ -3,7 +3,8 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from "react"
 import { supabase } from "../lib/supabase";
 import { Card, Field, GhostButton, PrimaryButton, Modal } from "../components/UI";
 import { DealerForm, AgencyForm } from "./Masters";
-import { todayIST, fmtDate } from "../lib/dates";
+import { todayIST, fmtDate, istDayStart, istNextDayStart } from "../lib/dates";
+import { fetchAllRows } from "../lib/fetchAll";
 
 // Tailwind classes per ledger_type, purely cosmetic grouping — payments in
 // green, PCC in blue, anything else (service names like LL RIC, MCWG...)
@@ -855,61 +856,169 @@ function SortableTh({ label, sortKeyName, sortKey, sortDir, onSort, align = "lef
 }
 
 // Bank tab — tracks money actually flowing through the bank account:
-// RTO government fee paid out (rto_fee on SERVICE entries) vs. money
-// collected via UPI (Cash never touches the bank, so it's excluded), with
-// a running Bank Balance. Backed by the bank_ledger view
-// (009_bank_ledger_view.sql), which already does the daily grouping and
-// running-total math server-side.
+// RTO fee + PCC fee paid out vs. money collected via UPI (Cash never touches
+// the bank), with a running Bank Balance.
+//
+// UPI received and the opening balance still come from the bank_ledger view
+// (009_bank_ledger_view.sql). The FEE side is rebuilt here straight from the
+// applications so each fee lands on the day it was actually paid:
+//   • RTO Fee — the day the Fee was filled in (fee_entered_at), falling back
+//     to application_date, then submitted_at.
+//   • PCC Fee — the day the application was submitted on the PCC portal (the
+//     "Pending" step of the synced timeline); if there's no sync yet, the day
+//     the PCC No was first written (pcc_no_entered_at, migration 022); then
+//     application_date, then submitted_at.
+// The running balance is the view's balance with its own fee figures swapped
+// for these, so whatever else the view accounts for is preserved.
+// Clicking a date opens everything that happened on that day.
+
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+// Portal timeline dates look like "14 Jun 2026, 10:30 AM" -> "2026-06-14".
+function portalDateToISO(text) {
+  const t = String(text || "").trim();
+  let m = t.match(/(\d{1,2})[\s-]+([A-Za-z]{3})[a-z]*[\s,-]+(\d{4})/);
+  if (m) {
+    const mo = MONTHS[m[2].toLowerCase()];
+    if (mo) return `${m[3]}-${String(mo).padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  }
+  m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = t.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  return null;
+}
+const tsToDay = (ts) => (ts ? todayIST(new Date(ts)) : null);
+const inr = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+
+function rtoFeeDate(r) {
+  return tsToDay(r.fee_entered_at) || (r.application_date ? String(r.application_date).slice(0, 10) : null) || tsToDay(r.submitted_at);
+}
+// Returns { date, source }.
+function pccFeeDate(r) {
+  const tl = Array.isArray(r.pcc_timeline) ? r.pcc_timeline : [];
+  const first = tl.find((t) => t?.stage === "Pending") || tl[0];
+  const fromPortal = portalDateToISO(first?.date);
+  if (fromPortal) return { date: fromPortal, source: "PCC portal (application submitted)" };
+  const typed = tsToDay(r.pcc_no_entered_at);
+  if (typed) return { date: typed, source: "day PCC No was written" };
+  const d = (r.application_date ? String(r.application_date).slice(0, 10) : null) || tsToDay(r.submitted_at);
+  return { date: d, source: "application date (no PCC date recorded)" };
+}
+
+const APP_FEE_COLS = "id, draft_code, applicant_name, rto_fee, pcc_fee, pcc_no, fee_entered_at, application_date, submitted_at, pcc_timeline, dealers(name)";
+
+async function loadFeeApplications() {
+  const build = (cols) => () =>
+    supabase.from("applications").select(cols).or("rto_fee.gt.0,pcc_fee.gt.0").order("id");
+  // pcc_no_entered_at only exists after migration 022 — fall back without it.
+  let res = await fetchAllRows(build(APP_FEE_COLS + ", pcc_no_entered_at"));
+  if (res.error) res = await fetchAllRows(build(APP_FEE_COLS));
+  if (res.error) throw res.error;
+  return res.data || [];
+}
+
 function BankTab() {
-  const [rows, setRows] = useState([]);
+  const [viewRows, setViewRows] = useState([]);
+  const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [rangeFrom, setRangeFrom] = useState("");
   const [rangeTo, setRangeTo] = useState("");
+  const [openDate, setOpenDate] = useState(null);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const { data, error } = await supabase.from("bank_ledger").select("*").order("entry_date", { ascending: false });
-      if (error) { setLoadError(error.message); setLoading(false); return; }
-      setLoadError(null);
-      setRows(data || []);
+      try {
+        const [{ data, error }, appRows] = await Promise.all([
+          supabase.from("bank_ledger").select("*").order("entry_date", { ascending: false }),
+          loadFeeApplications(),
+        ]);
+        if (error) throw error;
+        setViewRows(data || []);
+        setApps(appRows);
+        setLoadError(null);
+      } catch (e) {
+        setLoadError(e?.message || "Couldn't load bank ledger");
+      }
       setLoading(false);
     })();
   }, []);
 
   const today = todayIST();
-  const todayRow = rows.find((r) => r.entry_date === today);
-  const latestBalance = rows[0]?.bank_balance ?? 0; // rows are newest-first
 
-  const filteredRows = rows.filter((r) => {
+  // Day-wise build: fees from applications, UPI + balance baseline from the view.
+  const { dayRows, feeItemsByDate } = useMemo(() => {
+    const days = new Map();
+    const ensure = (d) => {
+      if (!days.has(d)) days.set(d, { entry_date: d, rto: 0, pcc: 0, upi: 0, viewFee: 0, viewBalance: null });
+      return days.get(d);
+    };
+    const items = new Map(); // date -> { rto: [], pcc: [] }
+    const addItem = (d, kind, item) => {
+      if (!items.has(d)) items.set(d, { rto: [], pcc: [] });
+      items.get(d)[kind].push(item);
+    };
+    viewRows.forEach((v) => {
+      const d = ensure(v.entry_date);
+      d.upi = Number(v.upi_received || 0);
+      d.viewFee = Number(v.fee_paid || 0);
+      d.viewBalance = Number(v.bank_balance || 0);
+    });
+    apps.forEach((a) => {
+      const base = { id: a.id, draft: a.draft_code, name: a.applicant_name, dealer: a.dealers?.name };
+      if (Number(a.rto_fee) > 0) {
+        const d = rtoFeeDate(a);
+        if (d) { ensure(d).rto += Number(a.rto_fee); addItem(d, "rto", { ...base, amount: Number(a.rto_fee) }); }
+      }
+      if (Number(a.pcc_fee) > 0) {
+        const { date, source } = pccFeeDate(a);
+        if (date) { ensure(date).pcc += Number(a.pcc_fee); addItem(date, "pcc", { ...base, amount: Number(a.pcc_fee), pccNo: a.pcc_no, source }); }
+      }
+    });
+    const asc = [...days.values()].sort((x, y) => x.entry_date.localeCompare(y.entry_date));
+    let carry = 0, cumViewFee = 0, cumNewFee = 0;
+    asc.forEach((d) => {
+      if (d.viewBalance !== null) carry = d.viewBalance;
+      cumViewFee += d.viewFee;
+      cumNewFee += d.rto + d.pcc;
+      d.net = d.upi - d.rto - d.pcc;
+      d.balance = carry + cumViewFee - cumNewFee;
+    });
+    return { dayRows: asc.reverse(), feeItemsByDate: items }; // newest first
+  }, [viewRows, apps]);
+
+  const todayRow = dayRows.find((r) => r.entry_date === today);
+  const latestBalance = dayRows[0]?.balance ?? 0;
+
+  const filteredRows = dayRows.filter((r) => {
     if (rangeFrom && r.entry_date < rangeFrom) return false;
     if (rangeTo && r.entry_date > rangeTo) return false;
     return true;
   });
   const periodTotals = filteredRows.reduce(
-    (acc, r) => {
-      acc.feePaid += Number(r.fee_paid || 0);
-      acc.upiReceived += Number(r.upi_received || 0);
-      return acc;
-    },
-    { feePaid: 0, upiReceived: 0 }
+    (acc, r) => ({ rto: acc.rto + r.rto, pcc: acc.pcc + r.pcc, upi: acc.upi + r.upi }),
+    { rto: 0, pcc: 0, upi: 0 }
   );
 
   return (
     <div>
-      <div className="grid sm:grid-cols-3 gap-4 mb-5">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
         <Card>
-          <p className="text-xs text-slate-400 dark:text-slate-500">Fee Paid Today</p>
-          <p className="text-xl font-bold text-rose-600 mt-1">₹{Number(todayRow?.fee_paid || 0).toLocaleString("en-IN")}</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500">RTO Fee Today</p>
+          <p className="text-xl font-bold text-rose-600 mt-1">{inr(todayRow?.rto)}</p>
+        </Card>
+        <Card>
+          <p className="text-xs text-slate-400 dark:text-slate-500">PCC Fee Today</p>
+          <p className="text-xl font-bold text-rose-600 mt-1">{inr(todayRow?.pcc)}</p>
         </Card>
         <Card>
           <p className="text-xs text-slate-400 dark:text-slate-500">Received in Bank Today (UPI)</p>
-          <p className="text-xl font-bold text-emerald-600 mt-1">₹{Number(todayRow?.upi_received || 0).toLocaleString("en-IN")}</p>
+          <p className="text-xl font-bold text-emerald-600 mt-1">{inr(todayRow?.upi)}</p>
         </Card>
         <Card>
           <p className="text-xs text-slate-400 dark:text-slate-500">Bank Balance</p>
-          <p className="text-xl font-bold text-slate-800 dark:text-slate-100 mt-1">₹{Number(latestBalance).toLocaleString("en-IN")}</p>
+          <p className="text-xl font-bold text-slate-800 dark:text-slate-100 mt-1">{inr(latestBalance)}</p>
           {loadError && <p className="text-[11px] text-amber-600 mt-1">Error: {loadError}</p>}
         </Card>
       </div>
@@ -936,18 +1045,21 @@ function BankTab() {
         )}
         {(rangeFrom || rangeTo) && (
           <span className="text-xs text-slate-400 dark:text-slate-500 ml-2">
-            Period total — Fee Paid: <span className="text-rose-600 font-semibold">₹{periodTotals.feePaid.toLocaleString("en-IN")}</span>
-            {" · "}UPI Received: <span className="text-emerald-600 font-semibold">₹{periodTotals.upiReceived.toLocaleString("en-IN")}</span>
+            Period total — RTO Fee: <span className="text-rose-600 font-semibold">{inr(periodTotals.rto)}</span>
+            {" · "}PCC Fee: <span className="text-rose-600 font-semibold">{inr(periodTotals.pcc)}</span>
+            {" · "}UPI Received: <span className="text-emerald-600 font-semibold">{inr(periodTotals.upi)}</span>
           </span>
         )}
       </div>
 
+      <p className="text-[11px] text-slate-400 dark:text-slate-500 mb-2">Click a date to see everything that happened that day.</p>
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-x-auto">
         <table className="m-scroll w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-500">
             <tr>
               <th className="px-3 py-2 text-left">Date</th>
-              <th className="px-3 py-2 text-right">Fee Paid</th>
+              <th className="px-3 py-2 text-right">RTO Fee</th>
+              <th className="px-3 py-2 text-right">PCC Fee</th>
               <th className="px-3 py-2 text-right">UPI Received</th>
               <th className="px-3 py-2 text-right">Net</th>
               <th className="px-3 py-2 text-right">Bank Balance</th>
@@ -955,34 +1067,131 @@ function BankTab() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={5} className="text-center text-slate-400 dark:text-slate-500 py-8">Loading…</td></tr>
+              <tr><td colSpan={6} className="text-center text-slate-400 dark:text-slate-500 py-8">Loading…</td></tr>
             ) : filteredRows.length === 0 ? (
-              <tr><td colSpan={5} className="text-center text-slate-400 dark:text-slate-500 py-8">No activity yet</td></tr>
+              <tr><td colSpan={6} className="text-center text-slate-400 dark:text-slate-500 py-8">No activity yet</td></tr>
             ) : (
               filteredRows.map((r) => (
                 <tr key={r.entry_date} className={`border-t border-slate-100 dark:border-slate-800 ${r.entry_date === today ? "bg-blue-50 dark:bg-blue-500/10" : ""}`}>
-                  <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">
-                    {fmtDate(r.entry_date)}{r.entry_date === today ? " (Today)" : ""}
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <button
+                      onClick={() => setOpenDate(r.entry_date)}
+                      title="See what happened this day"
+                      className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                    >
+                      {fmtDate(r.entry_date)}{r.entry_date === today ? " (Today)" : ""}
+                    </button>
                   </td>
-                  <td className="px-3 py-2 text-right text-rose-600 font-medium whitespace-nowrap">
-                    {r.fee_paid > 0 ? `₹${Number(r.fee_paid).toLocaleString("en-IN")}` : "—"}
+                  <td className="px-3 py-2 text-right text-rose-600 font-medium whitespace-nowrap">{r.rto > 0 ? inr(r.rto) : "—"}</td>
+                  <td className="px-3 py-2 text-right text-rose-600 font-medium whitespace-nowrap">{r.pcc > 0 ? inr(r.pcc) : "—"}</td>
+                  <td className="px-3 py-2 text-right text-emerald-600 font-medium whitespace-nowrap">{r.upi > 0 ? inr(r.upi) : "—"}</td>
+                  <td className={`px-3 py-2 text-right font-medium whitespace-nowrap ${r.net < 0 ? "text-rose-600" : "text-emerald-600"}`}>
+                    {r.net >= 0 ? "+" : "-"}{inr(Math.abs(r.net))}
                   </td>
-                  <td className="px-3 py-2 text-right text-emerald-600 font-medium whitespace-nowrap">
-                    {r.upi_received > 0 ? `₹${Number(r.upi_received).toLocaleString("en-IN")}` : "—"}
-                  </td>
-                  <td className={`px-3 py-2 text-right font-medium whitespace-nowrap ${r.net_for_day < 0 ? "text-rose-600" : "text-emerald-600"}`}>
-                    {r.net_for_day >= 0 ? "+" : ""}₹{Number(r.net_for_day).toLocaleString("en-IN")}
-                  </td>
-                  <td className="px-3 py-2 text-right font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">
-                    ₹{Number(r.bank_balance).toLocaleString("en-IN")}
-                  </td>
+                  <td className="px-3 py-2 text-right font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">{inr(r.balance)}</td>
                 </tr>
               ))
             )}
           </tbody>
         </table>
       </div>
+
+      {openDate && (
+        <BankDayModal
+          date={openDate}
+          day={dayRows.find((r) => r.entry_date === openDate)}
+          feeItems={feeItemsByDate.get(openDate) || { rto: [], pcc: [] }}
+          onClose={() => setOpenDate(null)}
+        />
+      )}
     </div>
   );
 }
 
+// Everything that moved the bank on one day: RTO fees, PCC fees and the UPI
+// payments received (loaded on open, since the view only has day totals).
+function BankDayModal({ date, day, feeItems, onClose }) {
+  const [upi, setUpi] = useState(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("payments")
+        .select("id, amount, payment_mode, created_at, dealer_id, dealers(name), applications(draft_code, applicant_name)")
+        .eq("payment_mode", "UPI")
+        .not("dealer_id", "is", null)
+        .gte("created_at", istDayStart(date))
+        .lt("created_at", istNextDayStart(date))
+        .order("created_at");
+      if (cancelled) return;
+      if (error) { setErr(error.message); setUpi([]); return; }
+      setUpi(data || []);
+    })();
+    return () => { cancelled = true; };
+  }, [date]);
+
+  const time = (ts) => new Date(ts).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
+  const Section = ({ title, total, tone, children, empty }) => (
+    <div className="mb-5">
+      <div className="flex items-center justify-between mb-1.5">
+        <h4 className="text-sm font-bold text-slate-700 dark:text-slate-200">{title}</h4>
+        <span className={`text-sm font-bold ${tone}`}>{inr(total)}</span>
+      </div>
+      {empty ? <p className="text-xs text-slate-400 dark:text-slate-500">Nothing</p> : <div className="border border-slate-200 dark:border-slate-800 rounded-lg divide-y divide-slate-100 dark:divide-slate-800">{children}</div>}
+    </div>
+  );
+  const Row = ({ left, sub, amount, tone }) => (
+    <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+      <div className="min-w-0">
+        <div className="text-slate-700 dark:text-slate-200 truncate">{left}</div>
+        {sub && <div className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{sub}</div>}
+      </div>
+      <div className={`font-semibold whitespace-nowrap ${tone}`}>{inr(amount)}</div>
+    </div>
+  );
+  const upiTotal = (upi || []).reduce((a, p) => a + Number(p.amount || 0), 0);
+
+  return (
+    <Modal title={`${fmtDate(date)} — Bank activity`} onClose={onClose} wide>
+      {day && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5 text-center">
+          {[
+            ["RTO Fee", inr(day.rto), "text-rose-600"],
+            ["PCC Fee", inr(day.pcc), "text-rose-600"],
+            ["UPI In", inr(day.upi), "text-emerald-600"],
+            ["Balance", inr(day.balance), "text-slate-800 dark:text-slate-100"],
+          ].map(([l, v, c]) => (
+            <div key={l} className="rounded-lg border border-slate-200 dark:border-slate-800 py-2">
+              <div className="text-[11px] text-slate-400 dark:text-slate-500">{l}</div>
+              <div className={`font-bold ${c}`}>{v}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <Section title={`RTO Fee (${feeItems.rto.length})`} total={day?.rto || 0} tone="text-rose-600" empty={!feeItems.rto.length}>
+        {feeItems.rto.map((i) => (
+          <Row key={`r-${i.id}`} left={`${i.draft || "Application"}${i.name ? ` — ${i.name}` : ""}`} sub={i.dealer} amount={i.amount} tone="text-rose-600" />
+        ))}
+      </Section>
+      <Section title={`PCC Fee (${feeItems.pcc.length})`} total={day?.pcc || 0} tone="text-rose-600" empty={!feeItems.pcc.length}>
+        {feeItems.pcc.map((i) => (
+          <Row key={`p-${i.id}`} left={`${i.draft || "Application"}${i.name ? ` — ${i.name}` : ""}`} sub={`${i.pccNo ? `PCC ${i.pccNo} · ` : ""}${i.source}`} amount={i.amount} tone="text-rose-600" />
+        ))}
+      </Section>
+      <Section title={`UPI Received${upi ? ` (${upi.length})` : ""}`} total={upi ? upiTotal : day?.upi || 0} tone="text-emerald-600" empty={upi !== null && !upi.length}>
+        {upi === null ? <p className="px-3 py-2 text-xs text-slate-400">Loading…</p> : upi.map((p) => (
+          <Row
+            key={p.id}
+            left={`${p.dealers?.name || "Dealer"}${p.applications?.draft_code ? ` — ${p.applications.draft_code}` : ""}`}
+            sub={`${time(p.created_at)}${p.applications?.applicant_name ? ` · ${p.applications.applicant_name}` : ""}`}
+            amount={p.amount}
+            tone="text-emerald-600"
+          />
+        ))}
+      </Section>
+      {err && <p className="text-xs text-amber-600">Couldn't load UPI payments: {err}</p>}
+    </Modal>
+  );
+}
