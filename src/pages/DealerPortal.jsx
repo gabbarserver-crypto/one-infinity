@@ -372,6 +372,7 @@ export default function DealerPortal({ dealer, identity, call, onLogout, pushTar
         apkPath={APK_PATH}
         onOpenGames={openGames}
         onSetupPasskey={setUpPasskey}
+        onPayByQr={() => setShowQr(true)}
       />
       <div className="flex-1 w-full max-w-full min-w-0 flex flex-col md:h-screen md:overflow-y-auto">
       {/* Mobile-only compact header — on desktop, DealerSidebar above
@@ -492,7 +493,10 @@ export default function DealerPortal({ dealer, identity, call, onLogout, pushTar
         {(tab === "Applications" || (tab === "Dashboard" && fromYear > 0)) && (
         <div className="w-full min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
           {tab === "Applications" && (
-            <PrimaryButton onClick={() => setShowNew(true)} className="w-full sm:w-auto min-w-0 justify-center whitespace-nowrap">+ New Application</PrimaryButton>
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+              <PrimaryButton onClick={() => setShowNew(true)} className="w-full sm:w-auto min-w-0 justify-center whitespace-nowrap">+ New Application</PrimaryButton>
+              <GhostButton onClick={() => setShowQr(true)} className="w-full sm:w-auto min-w-0 justify-center whitespace-nowrap">Pay by QR</GhostButton>
+            </div>
           )}
           {fromYear > 0 && tab === "Dashboard" && (
             <span className="sm:ml-auto text-xs font-medium px-2 py-0.5 rounded-full border bg-slate-50 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700">
@@ -1477,7 +1481,7 @@ function DealerApplications({ dealerId, identity, refreshKey, onSelect, onChat, 
             </thead>
             <tbody>
               {sortedRows.map((r) => (
-                <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:bg-slate-800/60">
+                <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60">
                   <td className="px-3 py-2 text-slate-700 dark:text-slate-300">
                     <button
                       onClick={() => setDetailsApp(r)}
@@ -1737,7 +1741,7 @@ function DealerAppointments({ dealerId, identity, refreshKey, fromYear = new Dat
               {eligibleRows.map((r) => {
                 const nextService = serviceList.find((s) => s.id === r.services?.next_service_id);
                 return (
-                  <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:bg-slate-800/60">
+                  <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60">
                     <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">{r.application_no || r.draft_code}</td>
                     <td className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap">{r.services?.short_name || r.services?.parent_service || "—"}</td>
                     <td className="px-3 py-2 text-blue-600 font-semibold">{r.applicant_name}</td>
@@ -1915,6 +1919,11 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
         const cvr = isCvrService(r.services);
         if (needed && !hasPccNo && !cvr) return true; // PCC due, whatever the RTO
         if (hasPccNo && r.rto_id && rtoIsPcc(r)) return true;
+        // PCC needed + a PCC No already entered (e.g. a drafted number) but the
+        // RTO was never filled in: still a PCC application — same rule as the
+        // admin PCC page. Without this an LL RIC row with a drafted PCC No
+        // never shows here (and its "Drafted" filter stays empty).
+        if (needed && hasPccNo && !r.rto_id && !cvr) return true;
         return needed && !cvr && (!r.rto_id || rtoIsPcc(r)) && (isPccServiceRow(r.services) || !!r.rto_id);
       }));
       setLoading(false);

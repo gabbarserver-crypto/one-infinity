@@ -29,6 +29,7 @@ import {
   ChevronRight,
   LogOut,
   CalendarClock,
+  QrCode,
 } from "lucide-react";
 
 const ICONS = {
@@ -94,6 +95,7 @@ export default function DealerSidebar({
   apkPath,
   onOpenGames,
   onSetupPasskey,
+  onPayByQr,
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [dark, toggleDark] = useDarkMode();
@@ -169,6 +171,21 @@ export default function DealerSidebar({
           ))}
         </nav>
       </div>
+
+      {/* Pay by QR — always reachable on desktop, whichever tab is open. */}
+      {onPayByQr && (
+        <div className="px-4 pb-3">
+          <button
+            onClick={onPayByQr}
+            title="Pay by QR"
+            aria-label="Pay by QR"
+            className={`w-full flex items-center rounded-xl bg-white/15 hover:bg-white/25 text-white text-sm font-semibold py-2.5 ${collapsed ? "justify-center px-0" : "gap-2.5 px-3"}`}
+          >
+            <QrCode size={16} />
+            {!collapsed && <span>Pay by QR</span>}
+          </button>
+        </div>
+      )}
 
       {/* Quick actions — app download / games / passkey, same shortcuts
           that used to live as icon buttons in the old top header. */}

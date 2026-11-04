@@ -2267,7 +2267,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                     </button>
                   </div>
                   {TOGGLEABLE_COLUMNS.map((c) => (
-                    <label key={c.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 dark:bg-slate-800/60 cursor-pointer text-sm text-slate-700 dark:text-slate-300">
+                    <label key={c.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer text-sm text-slate-700 dark:text-slate-300">
                       <input type="checkbox" checked={visibleCols[c.key]} onChange={() => toggleCol(c.key)} />
                       {c.label}
                     </label>
