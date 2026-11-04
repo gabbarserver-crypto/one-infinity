@@ -266,6 +266,9 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
   // Bulk "check all PCC status" run: { done, total } while running.
   const [checkProgress, setCheckProgress] = useState(null);
   const [checkSummary, setCheckSummary] = useState(null);
+  // Rows whose PCC progress moved in the last bulk check (status OR stage OR a
+  // new portal step) — highlighted in the table until the next check/dismiss.
+  const [updatedIds, setUpdatedIds] = useState(() => new Set());
   const stopRef = useRef(false);
   // Bulk certificate upload: { done, total } while running, then a summary.
   const fileInputRef = useRef(null);
@@ -454,12 +457,14 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
 
     stopRef.current = false;
     setCheckSummary(null);
+    setUpdatedIds(new Set());
     setCheckProgress({ done: 0, total: checkable.length });
     const queue = [...checkable];
     let done = 0;
     let changed = 0;
     let unchanged = 0;
     const failures = [];
+    const updatedList = []; // { id, draft, name, from, to }
 
     const worker = async () => {
       while (!stopRef.current) {
@@ -471,8 +476,24 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
             unchanged += 1; // portal had no progress timeline yet
           } else {
             const becameIssued = updates.pcc_status === "Certificate Issued" && row.pcc_status !== "Certificate Issued";
-            if (updates.pcc_status && updates.pcc_status !== row.pcc_status) changed += 1;
-            else unchanged += 1;
+            // "Changed" = status moved, OR the portal stage moved (e.g. still
+            // Under Verification but now "Field Verified"), OR a new step
+            // appeared on the portal timeline.
+            const statusMoved = !!updates.pcc_status && updates.pcc_status !== row.pcc_status;
+            const stageMoved = !!updates.pcc_stage && updates.pcc_stage !== row.pcc_stage;
+            const stepsAdded = (updates.pcc_timeline?.length || 0) > (Array.isArray(row.pcc_timeline) ? row.pcc_timeline.length : 0);
+            if (statusMoved || stageMoved || stepsAdded) {
+              changed += 1;
+              updatedList.push({
+                id: row.id,
+                draft: row.draft_code,
+                name: row.applicant_name,
+                from: row.pcc_stage || row.pcc_status || "—",
+                to: updates.pcc_stage || updates.pcc_status || "—",
+                statusMoved,
+              });
+              setUpdatedIds((prev) => new Set(prev).add(row.id));
+            } else unchanged += 1;
             // The database trigger stamps pcc_issued_at; mirror it locally so
             // the row jumps to the top without a reload.
             const local = becameIssued ? { ...updates, pcc_issued_at: new Date().toISOString() } : updates;
@@ -493,6 +514,7 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
       checked: done,
       changed,
       unchanged,
+      updatedList,
       failures,
       stopped: stopRef.current && done < checkable.length,
     });
@@ -736,15 +758,26 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
             <div>
               <span className="font-semibold">{checkSummary.stopped ? "Stopped" : "Done"}:</span>{" "}
               {checkSummary.checked} of {checkSummary.total} checked —{" "}
-              <span className="text-green-600 dark:text-green-400 font-semibold">{checkSummary.changed} status changed</span>,{" "}
+              <span className="text-green-600 dark:text-green-400 font-semibold">{checkSummary.changed} updated</span>,{" "}
               {checkSummary.unchanged} unchanged
               {checkSummary.failures.length > 0 && (
                 <>, <span className="text-red-600 dark:text-red-400 font-semibold">{checkSummary.failures.length} not found / failed</span></>
               )}
               .
             </div>
-            <button onClick={() => setCheckSummary(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-lg leading-none" aria-label="Dismiss">×</button>
+            <button onClick={() => { setCheckSummary(null); setUpdatedIds(new Set()); }} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-lg leading-none" aria-label="Dismiss">×</button>
           </div>
+          {checkSummary.updatedList?.length > 0 && (
+            <ul className="mt-2 text-xs space-y-0.5">
+              {checkSummary.updatedList.map((u) => (
+                <li key={u.id} className="text-slate-600 dark:text-slate-300">
+                  <span className="font-bold text-green-600 dark:text-green-400">{u.name || u.draft}</span>
+                  <span className="text-slate-400"> · {u.draft} · </span>
+                  {u.from === u.to ? <span>{u.to} (new step on portal)</span> : <span>{u.from} → <span className="font-semibold">{u.to}</span></span>}
+                </li>
+              ))}
+            </ul>
+          )}
           {checkSummary.failures.length > 0 && (
             <details className="mt-2 text-xs">
               <summary className="cursor-pointer text-slate-500 dark:text-slate-400">Show not found / failed</summary>
@@ -813,14 +846,18 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
               ) : (
                 pageRows.map((r) => {
                   const stage = getProcessingStage(r);
+                  const justUpdated = updatedIds.has(r.id);
                   return (
-                    <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50/60 dark:hover:bg-slate-800/30">
+                    <tr key={r.id} className={`border-t border-slate-100 dark:border-slate-800 ${justUpdated ? "bg-green-50 dark:bg-green-500/10 shadow-[inset_3px_0_0_0_#22c55e]" : "hover:bg-slate-50/60 dark:hover:bg-slate-800/30"}`}>
                       <td className="px-3 py-2 whitespace-nowrap font-semibold text-blue-600 dark:text-blue-400">{r.draft_code}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{isoToDDMMYYYY(rowDateISO(r))}</td>
                       {showAmount && <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{r.amount ?? ""}</td>}
                       <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{dealerLabel(r.dealers)}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{serviceLabel(r.services)}</td>
-                      <td className="px-3 py-2 whitespace-nowrap font-semibold text-slate-800 dark:text-slate-100">{r.applicant_name}</td>
+                      <td className="px-3 py-2 whitespace-nowrap font-semibold text-slate-800 dark:text-slate-100">
+                        <span className={justUpdated ? "font-extrabold text-green-700 dark:text-green-400" : ""}>{r.applicant_name}</span>
+                        {justUpdated && <span className="ml-1.5 rounded bg-green-600 text-white text-[10px] font-bold px-1.5 py-0.5 align-middle">UPDATED</span>}
+                      </td>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300"><FatherCell row={r} onSave={saveFatherName} /></td>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{r.application_no || ""}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{r.ll_dl_no || ""}</td>

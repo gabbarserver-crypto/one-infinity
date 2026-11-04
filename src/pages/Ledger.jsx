@@ -391,10 +391,19 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
           >
             Bank
           </button>
+          <button
+            onClick={() => setEntityMode("cash")}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+              entityMode === "cash" ? "bg-blue-600 text-white" : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+            }`}
+          >
+            Cash
+          </button>
         </div>
       )}
 
       {(only === "bank" || (!only && entityMode === "bank")) && <BankTab />}
+      {!only && entityMode === "cash" && <CashTab />}
 
       {(only === "dealer" || (!only && entityMode === "dealer")) && (
         <SundryHead
@@ -1192,6 +1201,204 @@ function BankDayModal({ date, day, feeItems, onClose }) {
         ))}
       </Section>
       {err && <p className="text-xs text-amber-600">Couldn't load UPI payments: {err}</p>}
+    </Modal>
+  );
+}
+
+// Cash tab — physical cash through the counter, built straight from payments
+// (mode = Cash), dated by the day the payment was recorded:
+//   • Cash IN  — a dealer paid cash (shows WHICH DEALER).
+//   • Cash OUT — cash handed to an agency (shows WHICH AGENCY).
+// A dealer paying cash straight to an agency counts in both (net zero), so
+// it still shows "from dealer X → agency Y". Cash Balance is the running
+// total of in minus out over everything recorded here (no opening balance).
+function CashTab() {
+  const [pays, setPays] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
+  const [openDate, setOpenDate] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const { data, error } = await fetchAllRows(() =>
+        supabase
+          .from("payments")
+          .select("id, amount, payment_mode, created_at, dealer_id, paid_at_agency_id, reference_no, receipt_no, remarks, dealers(name), applications(draft_code, applicant_name), paid_at_agency:paid_at_agency_id(name)")
+          .ilike("payment_mode", "cash")
+          .order("created_at")
+          .order("id")
+      );
+      if (error) setLoadError(error.message);
+      else { setLoadError(null); setPays(data || []); }
+      setLoading(false);
+    })();
+  }, []);
+
+  const today = todayIST();
+
+  const dayRows = useMemo(() => {
+    const days = new Map();
+    pays.forEach((p) => {
+      const d = tsToDay(p.created_at);
+      if (!d) return;
+      if (!days.has(d)) days.set(d, { entry_date: d, cashIn: 0, cashOut: 0, from: new Map(), to: new Map(), items: [] });
+      const row = days.get(d);
+      const amt = Number(p.amount || 0);
+      if (p.dealer_id) {
+        row.cashIn += amt;
+        const n = p.dealers?.name || "Dealer";
+        row.from.set(n, (row.from.get(n) || 0) + amt);
+      }
+      if (p.paid_at_agency_id) {
+        row.cashOut += amt;
+        const n = p.paid_at_agency?.name || "Agency";
+        row.to.set(n, (row.to.get(n) || 0) + amt);
+      }
+      row.items.push(p);
+    });
+    const asc = [...days.values()].sort((a, b) => a.entry_date.localeCompare(b.entry_date));
+    let bal = 0;
+    asc.forEach((r) => { bal += r.cashIn - r.cashOut; r.net = r.cashIn - r.cashOut; r.balance = bal; });
+    return asc.reverse();
+  }, [pays]);
+
+  const todayRow = dayRows.find((r) => r.entry_date === today);
+  const latestBalance = dayRows[0]?.balance ?? 0;
+  const filteredRows = dayRows.filter((r) => (!rangeFrom || r.entry_date >= rangeFrom) && (!rangeTo || r.entry_date <= rangeTo));
+  const totals = filteredRows.reduce((a, r) => ({ i: a.i + r.cashIn, o: a.o + r.cashOut }), { i: 0, o: 0 });
+
+  const names = (m, tone) =>
+    m.size === 0 ? "—" : [...m.entries()].map(([n, a]) => `${n} ${inr(a)}`).join(", ");
+  const inputCls = "rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40";
+
+  return (
+    <div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+        <Card>
+          <p className="text-xs text-slate-400 dark:text-slate-500">Cash In Today (from dealers)</p>
+          <p className="text-xl font-bold text-emerald-600 mt-1">{inr(todayRow?.cashIn)}</p>
+        </Card>
+        <Card>
+          <p className="text-xs text-slate-400 dark:text-slate-500">Cash Out Today (to agencies)</p>
+          <p className="text-xl font-bold text-rose-600 mt-1">{inr(todayRow?.cashOut)}</p>
+        </Card>
+        <Card>
+          <p className="text-xs text-slate-400 dark:text-slate-500">Net Today</p>
+          <p className="text-xl font-bold text-slate-800 dark:text-slate-100 mt-1">{inr(todayRow?.net)}</p>
+        </Card>
+        <Card>
+          <p className="text-xs text-slate-400 dark:text-slate-500">Cash Balance</p>
+          <p className="text-xl font-bold text-slate-800 dark:text-slate-100 mt-1">{inr(latestBalance)}</p>
+          {loadError && <p className="text-[11px] text-amber-600 mt-1">Error: {loadError}</p>}
+        </Card>
+      </div>
+
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <label className="text-xs text-slate-400 dark:text-slate-500">From</label>
+        <input type="date" value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} className={inputCls} />
+        <label className="text-xs text-slate-400 dark:text-slate-500">To</label>
+        <input type="date" value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} className={inputCls} />
+        {(rangeFrom || rangeTo) && (
+          <>
+            <button onClick={() => { setRangeFrom(""); setRangeTo(""); }} className="text-sm font-semibold text-slate-500 hover:text-blue-600">Clear</button>
+            <span className="text-xs text-slate-400 dark:text-slate-500 ml-2">
+              Period total — Cash In: <span className="text-emerald-600 font-semibold">{inr(totals.i)}</span>
+              {" · "}Cash Out: <span className="text-rose-600 font-semibold">{inr(totals.o)}</span>
+            </span>
+          </>
+        )}
+      </div>
+
+      <p className="text-[11px] text-slate-400 dark:text-slate-500 mb-2">Click a date to see every cash entry of that day.</p>
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-x-auto">
+        <table className="m-scroll w-full text-sm">
+          <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-500">
+            <tr>
+              <th className="px-3 py-2 text-left">Date</th>
+              <th className="px-3 py-2 text-left">From Dealer</th>
+              <th className="px-3 py-2 text-right">Cash In</th>
+              <th className="px-3 py-2 text-left">To Agency</th>
+              <th className="px-3 py-2 text-right">Cash Out</th>
+              <th className="px-3 py-2 text-right">Net</th>
+              <th className="px-3 py-2 text-right">Cash Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={7} className="text-center text-slate-400 dark:text-slate-500 py-8">Loading…</td></tr>
+            ) : filteredRows.length === 0 ? (
+              <tr><td colSpan={7} className="text-center text-slate-400 dark:text-slate-500 py-8">No cash activity yet</td></tr>
+            ) : (
+              filteredRows.map((r) => (
+                <tr key={r.entry_date} className={`border-t border-slate-100 dark:border-slate-800 ${r.entry_date === today ? "bg-blue-50 dark:bg-blue-500/10" : ""}`}>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <button onClick={() => setOpenDate(r.entry_date)} className="text-blue-600 dark:text-blue-400 hover:underline font-medium">
+                      {fmtDate(r.entry_date)}{r.entry_date === today ? " (Today)" : ""}
+                    </button>
+                  </td>
+                  <td className="px-3 py-2 text-slate-600 dark:text-slate-300 max-w-[260px] truncate" title={names(r.from)}>{names(r.from)}</td>
+                  <td className="px-3 py-2 text-right text-emerald-600 font-medium whitespace-nowrap">{r.cashIn > 0 ? inr(r.cashIn) : "—"}</td>
+                  <td className="px-3 py-2 text-slate-600 dark:text-slate-300 max-w-[260px] truncate" title={names(r.to)}>{names(r.to)}</td>
+                  <td className="px-3 py-2 text-right text-rose-600 font-medium whitespace-nowrap">{r.cashOut > 0 ? inr(r.cashOut) : "—"}</td>
+                  <td className={`px-3 py-2 text-right font-medium whitespace-nowrap ${r.net < 0 ? "text-rose-600" : "text-emerald-600"}`}>
+                    {r.net >= 0 ? "+" : "-"}{inr(Math.abs(r.net))}
+                  </td>
+                  <td className="px-3 py-2 text-right font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">{inr(r.balance)}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {openDate && <CashDayModal date={openDate} day={dayRows.find((r) => r.entry_date === openDate)} onClose={() => setOpenDate(null)} />}
+    </div>
+  );
+}
+
+function CashDayModal({ date, day, onClose }) {
+  const time = (ts) => new Date(ts).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
+  const items = day?.items || [];
+  return (
+    <Modal title={`${fmtDate(date)} — Cash activity`} onClose={onClose} wide>
+      {day && (
+        <div className="grid grid-cols-3 gap-2 mb-5 text-center">
+          {[
+            ["Cash In", inr(day.cashIn), "text-emerald-600"],
+            ["Cash Out", inr(day.cashOut), "text-rose-600"],
+            ["Balance", inr(day.balance), "text-slate-800 dark:text-slate-100"],
+          ].map(([l, v, c]) => (
+            <div key={l} className="rounded-lg border border-slate-200 dark:border-slate-800 py-2">
+              <div className="text-[11px] text-slate-400 dark:text-slate-500">{l}</div>
+              <div className={`font-bold ${c}`}>{v}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="border border-slate-200 dark:border-slate-800 rounded-lg divide-y divide-slate-100 dark:divide-slate-800">
+        {items.map((p) => {
+          const dealer = p.dealer_id ? (p.dealers?.name || "Dealer") : null;
+          const agency = p.paid_at_agency_id ? (p.paid_at_agency?.name || "Agency") : null;
+          const title = dealer && agency ? `${dealer} → ${agency}` : dealer ? `From ${dealer}` : agency ? `To ${agency}` : "Cash";
+          const out = !!agency && !dealer; // pure agency payout
+          const through = !!agency && !!dealer; // dealer paid straight to agency
+          const tone = through ? "text-slate-600 dark:text-slate-300" : out ? "text-rose-600" : "text-emerald-600";
+          const sub = [time(p.created_at), p.applications?.draft_code && `${p.applications.draft_code}${p.applications.applicant_name ? ` (${p.applications.applicant_name})` : ""}`, p.receipt_no && `Receipt ${p.receipt_no}`, p.remarks]
+            .filter(Boolean).join(" · ");
+          return (
+            <div key={p.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+              <div className="min-w-0">
+                <div className="text-slate-700 dark:text-slate-200 truncate">{title}</div>
+                <div className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{sub}{through ? " · paid straight to agency (net zero)" : ""}</div>
+              </div>
+              <div className={`font-semibold whitespace-nowrap ${tone}`}>{out ? "−" : through ? "" : "+"}{inr(p.amount)}</div>
+            </div>
+          );
+        })}
+      </div>
     </Modal>
   );
 }
