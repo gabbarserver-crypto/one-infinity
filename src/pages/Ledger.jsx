@@ -60,6 +60,15 @@ function exportLedgerCSV(entityName, rows) {
 export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) {
   const [entityId, setEntityId] = useState(initialEntityId || "");
   const [entityMode, setEntityMode] = useState(only === "agency" ? "agency" : "dealer"); // "dealer" | "agency"
+  // Screenshot mode: hide the Draft No + Entry Code columns (remembered on this device).
+  const [hideCodes, setHideCodes] = useState(() => {
+    try { return localStorage.getItem("ledger_hide_codes") === "1"; } catch { return false; }
+  });
+  const toggleHideCodes = () => setHideCodes((v) => {
+    const next = !v;
+    try { localStorage.setItem("ledger_hide_codes", next ? "1" : "0"); } catch { /* ignore */ }
+    return next;
+  });
   const [summary, setSummary] = useState(null); // { credit_limit } for dealer mode, fetched from dealers table directly
   const [rows, setRowsState] = useState([]); // ledger rows for the open entity, from dealer_ledger / agency_ledger
   const [loadError, setLoadError] = useState(null);
@@ -484,6 +493,14 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
                 </button>
               )}
             </div>
+            <button
+              type="button"
+              onClick={toggleHideCodes}
+              title="Hide Draft No & Entry Code — handy for a clean screenshot to send to a dealer"
+              className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:border-blue-400 hover:text-blue-600"
+            >
+              {hideCodes ? "Show Draft No & Entry Code" : "Hide Draft No & Entry Code"}
+            </button>
           </div>
           <div className="grid sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-5">
             <Card>
@@ -520,9 +537,9 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
             <table className="m-scroll w-full text-sm">
               <thead className="bg-slate-50 text-slate-500 dark:bg-slate-800/60 dark:text-slate-500">
                 <tr>
+                  {!hideCodes && <SortableTh label="Draft No" sortKeyName="draft_code" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />}
                   <SortableTh label="Date" sortKeyName="entry_date" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableTh label="Draft No" sortKeyName="draft_code" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableTh label="Entry Code" sortKeyName="entry_code" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  {!hideCodes && <SortableTh label="Entry Code" sortKeyName="entry_code" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />}
                   <th className="px-3 py-2 text-left">Type</th>
                   <SortableTh label="Name" sortKeyName="display_name" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <SortableTh label="Debit" sortKeyName="debit" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
@@ -534,8 +551,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
               <tbody>
                 {periodRows.map((r) => (
                   <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
-                    <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{fmtDate(r.entry_date)}</td>
-                    <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">
+                    {!hideCodes && <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">
                       {isAdmin && (r.entry_type === "PAYMENT" || (r.entry_type === "SERVICE" && r.source_application_id)) ? (
                         draftEditId === r.id ? (
                           <span className="inline-flex items-center gap-1">
@@ -568,8 +584,9 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
                       ) : (
                         r.draft_code || "—"
                       )}
-                    </td>
-                    <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{r.entry_code}</td>
+                    </td>}
+                    <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{fmtDate(r.entry_date)}</td>
+                    {!hideCodes && <td className="px-3 py-2 text-slate-500 dark:text-slate-500 whitespace-nowrap">{r.entry_code}</td>}
                     <td className={`px-3 py-2 whitespace-nowrap ${txnTypeClass(r.ledger_type)}`}>{r.ledger_type || "—"}</td>
                     <td className="px-3 py-2 text-slate-700 dark:text-slate-300">
                       {r.entry_type === "SERVICE" ? (
@@ -613,7 +630,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
                   </tr>
                 ))}
                 {periodRows.length === 0 && (
-                  <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-slate-400 dark:text-slate-500 py-8">No transactions yet</td></tr>
+                  <tr><td colSpan={(isAdmin ? 8 : 7) - (hideCodes ? 2 : 0)} className="text-center text-slate-400 dark:text-slate-500 py-8">No transactions yet</td></tr>
                 )}
               </tbody>
             </table>
