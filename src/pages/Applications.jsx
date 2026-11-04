@@ -103,21 +103,31 @@ function ddmmyyyyToISO(input) {
   return trimmed; // leave as-is, let DB flag invalid dates
 }
 
+// Narrow box + short "N/R" label for table cells that don't apply to a row
+// (full tooltip still says "Not required"). Full-width form fields keep the
+// full "Not required" text.
+const NOT_REQUIRED_WIDTH = "w-12";
+const NOT_REQUIRED_TEXT = (width) => (width === "w-full" ? "Not required" : "N/R");
+
 function EditableCell({ value, onSave, type = "text", width = "w-24", placeholder = "", disabled = false, readOnly = false, readOnlyTitle, noSpinner = false }) {
   const canEdit = useContext(CanEditContext);
   const locked = disabled || readOnly || !canEdit;
   const [val, setVal] = useState(value ?? "");
   useEffect(() => { setVal(value ?? ""); }, [value]);
+  // "Not required" cells shrink to a narrow box in the table (a column still
+  // keeps its normal width if any other row has a real, editable value there).
+  // Full-width cells (the detail form) are left alone.
+  const effWidth = disabled && width !== "w-full" ? NOT_REQUIRED_WIDTH : width;
   return (
     <input
       type={type}
       value={locked ? (disabled ? "" : val) : val}
-      placeholder={disabled ? "Not required" : (!canEdit ? "" : placeholder)}
+      placeholder={disabled ? NOT_REQUIRED_TEXT(width) : (!canEdit ? "" : placeholder)}
       disabled={locked}
-      title={readOnly ? (readOnlyTitle || "Locked after approval") : (!canEdit && !disabled ? "You don't have edit access for this section" : undefined)}
+      title={disabled ? "Not required" : readOnly ? (readOnlyTitle || "Locked after approval") : (!canEdit ? "You don't have edit access for this section" : undefined)}
       onChange={(e) => setVal(e.target.value)}
       onBlur={() => { if (String(val) !== String(value ?? "")) onSave(val); }}
-      className={`${width} rounded border px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 ${noSpinner ? "no-spinner" : ""} ${
+      className={`${effWidth} rounded border px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 ${noSpinner ? "no-spinner" : ""} ${
         locked
           ? "border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 text-slate-400 dark:text-slate-500 placeholder:text-slate-300 dark:placeholder:text-slate-600 cursor-not-allowed"
           : "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100"
@@ -129,19 +139,20 @@ function EditableCell({ value, onSave, type = "text", width = "w-24", placeholde
 function EditableSelect({ value, options, onSave, width = "w-32", placeholder = "Select", disabled = false, readOnly = false, readOnlyTitle }) {
   const canEdit = useContext(CanEditContext);
   const locked = disabled || readOnly || !canEdit;
+  const effWidth = disabled && width !== "w-full" ? NOT_REQUIRED_WIDTH : width;
   return (
     <select
       value={locked && disabled ? "" : value || ""}
       onChange={(e) => onSave(e.target.value)}
       disabled={locked}
-      title={readOnly ? (readOnlyTitle || "Locked — click the applicant's name to edit") : (!canEdit && !disabled ? "You don't have edit access for this section" : undefined)}
-      className={`${width} rounded border px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 ${
+      title={disabled ? "Not required" : readOnly ? (readOnlyTitle || "Locked — click the applicant's name to edit") : (!canEdit ? "You don't have edit access for this section" : undefined)}
+      className={`${effWidth} rounded border px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 ${
         locked
           ? "border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 text-slate-400 dark:text-slate-500 cursor-not-allowed"
           : "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100"
       }`}
     >
-      <option value="">{disabled ? "Not required" : placeholder}</option>
+      <option value="">{disabled ? NOT_REQUIRED_TEXT(width) : placeholder}</option>
       {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
     </select>
   );

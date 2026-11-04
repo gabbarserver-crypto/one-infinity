@@ -11,7 +11,7 @@
 // DealerLedgerPage/AgencyLedgerPage), so the plain "Ledger" tab already
 // covers both — no separate bottom-bar slot needed for either.
 import React from "react";
-import { LayoutGrid, FileOutput, MessageSquare, BookOpen, Database, Users } from "lucide-react";
+import { LayoutGrid, FileOutput, MessageSquare, BookOpen, Database, Users, ShieldCheck, GraduationCap, CreditCard } from "lucide-react";
 
 const ICONS = {
   dashboard: LayoutGrid,
@@ -20,23 +20,26 @@ const ICONS = {
   chats: MessageSquare,
   ledger: BookOpen,
   masters: Database,
+  pccApplications: ShieldCheck,
+  learningApplications: GraduationCap,
+  dlApplications: CreditCard,
 };
 
 // The primary set this bar is allowed to show — kept in one place so
 // Dashboard.jsx's overflow row can exclude exactly these (plus
 // dealerLedger/agencyLedger) rather than duplicating this list.
-export const BOTTOM_TAB_KEYS = ["dashboard", "applications", "staffApplications", "chats", "ledger", "masters"];
+export const BOTTOM_TAB_KEYS = ["dashboard", "applications", "staffApplications", "pccApplications", "learningApplications", "dlApplications", "chats", "ledger", "masters"];
 
 export default function BottomTabBar({ nav, active, onNavigate, badges = {} }) {
-  // For any given role, only ONE of applications/staffApplications is ever
-  // actually in `nav` (see App.jsx's visibleNav), so this naturally caps at
-  // 5 real items — the slice is just a safety ceiling, not doing real work.
-  const items = nav.filter((n) => BOTTOM_TAB_KEYS.includes(n.key)).slice(0, 5);
+  // PCC / Learning / DL now sit in the bar too, so a role can have 8+ items —
+  // the bar scrolls sideways (each item keeps a fixed minimum width) instead
+  // of squeezing every label.
+  const items = nav.filter((n) => BOTTOM_TAB_KEYS.includes(n.key));
   if (items.length < 2) return null; // not worth a bar for a single-item role
 
   return (
     <nav
-      className="no-print md:hidden fixed bottom-0 inset-x-0 z-40 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex"
+      className="no-print md:hidden fixed bottom-0 inset-x-0 z-40 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex overflow-x-auto"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       {items.map((item) => {
@@ -47,7 +50,7 @@ export default function BottomTabBar({ nav, active, onNavigate, badges = {} }) {
           <button
             key={item.key}
             onClick={() => onNavigate(item.key)}
-            className={`flex-1 py-2 flex flex-col items-center gap-0.5 text-[10px] font-medium ${
+            className={`flex-1 min-w-[68px] shrink-0 py-2 flex flex-col items-center gap-0.5 text-[10px] font-medium ${
               isActive ? "text-blue-600 dark:text-blue-400" : "text-slate-400 dark:text-slate-500"
             }`}
           >

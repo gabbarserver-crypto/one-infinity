@@ -19,7 +19,7 @@ import BookAppointmentModal from "../components/BookAppointmentModal";
 import { isEligibleForAppointment, copyForwardDocuments } from "../lib/nextService";
 import { getOrCreateThread, sendMessage, listRecentThreadsForDealer } from "../lib/chat";
 import { notify } from "../lib/notify";
-import { createDealerStaffLogin, sendPush, chatUnreadSummary } from "../lib/serverApi";
+import { createDealerStaffLogin, sendPush, chatUnreadSummary, SERVER_API_BASE } from "../lib/serverApi";
 import { subscribeThreadRead } from "../lib/threadReadBus";
 import { DELHI_POLICE_STATIONS } from "../lib/delhiPoliceStations";
 import { ageHighlightClass, validateAgeForService } from "../lib/age";
@@ -29,13 +29,13 @@ import { useDarkMode } from "../lib/theme";
 import { Sun, Moon, Fingerprint, Download, Phone, ScanLine, ScanText, Gamepad2 } from "lucide-react";
 import SearchableSelect from "../components/SearchableSelect";
 import QrPaymentPanel from "../components/QrPaymentPanel";
-import PCCStatusCheckModal, { getPccRejectReason, stripKinPrefix } from "../components/PCCStatusCheckModal";
+import PCCStatusCheckModal, { getPccRejectReason, stripKinPrefix, normalizePccApplicationNumber, persistPccStatus } from "../components/PCCStatusCheckModal";
 import ImageCropModal from "../components/ImageCropModal";
 import DealerBottomTabBar from "../components/DealerBottomTabBar";
 import DealerSidebar from "../components/DealerSidebar";
 import DocUploadDropzone from "../components/DocUploadDropzone";
 import PastelAvatar from "../components/PastelAvatar";
-import { Search, Users } from "lucide-react";
+import { Search, Users, RefreshCw, Loader2, MessageSquare } from "lucide-react";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
 // (Ledger's description-parsing helpers are gone — dealer_ledger already
 // carries ledger_type / display_name as real columns, so nothing needs
@@ -468,6 +468,34 @@ export default function DealerPortal({ dealer, identity, call, onLogout, pushTar
 
       <main className="flex-1 w-full min-w-0 max-w-[1700px] mx-auto box-border p-6 pb-24 md:pb-8">
         {tab === "Dashboard" && (
+          // Call/Chat and Staff live here (top of Dashboard) on phones instead
+          // of in the bottom bar — desktop keeps them in the sidebar.
+          <div className="md:hidden w-full min-w-0 grid grid-cols-2 gap-2 mb-3">
+            <button
+              onClick={() => { refreshUnreadChats(); commsRef.current?.open(); }}
+              className="relative flex items-center justify-center gap-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 text-sm font-semibold py-3"
+            >
+              <MessageSquare size={18} />
+              Call/Chat
+              {unreadChats > 0 && (
+                <span className="absolute top-1.5 right-2 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">
+                  {unreadChats > 9 ? "9+" : unreadChats}
+                </span>
+              )}
+            </button>
+            {visibleTabs.includes("Staff") && (
+              <button
+                onClick={() => setTab("Staff")}
+                className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 text-sm font-semibold py-3"
+              >
+                <Users size={18} />
+                Staff
+              </button>
+            )}
+          </div>
+        )}
+
+        {tab === "Dashboard" && (
           <div className="w-full min-w-0 grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-4 mb-6">
             <div className="min-w-0 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-2.5 sm:p-5">
               <h3 className="text-[10px] sm:text-base font-semibold text-slate-800 dark:text-slate-100 mb-0.5 sm:mb-4 truncate">Running Balance</h3>
@@ -603,7 +631,7 @@ export default function DealerPortal({ dealer, identity, call, onLogout, pushTar
       <CommsWindow ref={commsRef} variant="dealer" dealerId={dealer.id} dealerName={dealer.name} identity={identity} call={call} />
 
       <DealerBottomTabBar
-        tabs={visibleTabs}
+        tabs={visibleTabs.includes("Dashboard") ? visibleTabs.filter((t) => t !== "Call/Chat" && t !== "Staff") : visibleTabs}
         active={tab}
         onNavigate={(t) => {
           if (t === "Call/Chat") {
@@ -1814,6 +1842,11 @@ async function downloadPccCertificate(row) {
   }
 }
 
+// Same endpoint the admin PCC page uses for its bulk "Check all" run.
+const PCC_CHECK_URL = `${import.meta.env.VITE_PCC_STATUS_API_BASE || SERVER_API_BASE}/api/pcc-status/check`;
+// A couple of portal lookups at a time — polite to the Delhi Police site.
+const PCC_SYNC_CONCURRENCY = 2;
+
 const DEALER_PCC_FILTERS = [
   { key: "", label: "All" },
   { key: "__none__", label: "Due" },
@@ -1889,6 +1922,9 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
   // Clicking a PCC No opens the Track Application popup and searches at once.
   const [pccCheckRow, setPccCheckRow] = useState(null);
   const [notice, setNotice] = useState(null);
+  // Bulk "Sync PCC" progress: null when idle, { done, total } while running.
+  const [syncProgress, setSyncProgress] = useState(null);
+  const [syncSummary, setSyncSummary] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -1963,6 +1999,65 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
     setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, father_husband_name: name } : r)));
   };
 
+  // This dealer's PCC applications that are still "Under Verification" (and
+  // have a real, trackable PCC No — drafted numbers aren't on the portal yet).
+  // `rows` only ever holds this dealer's own applications.
+  const syncable = rows.filter(
+    (r) => r.pcc_no && !isDraftPccNo(r.pcc_no) && r.pcc_status === "Under Verification"
+  );
+  const syncing = syncProgress !== null;
+
+  const runSync = async () => {
+    if (syncing || syncable.length === 0) return;
+    setSyncSummary(null);
+    setNotice(null);
+    setSyncProgress({ done: 0, total: syncable.length });
+    const queue = [...syncable];
+    let done = 0, changed = 0, unchanged = 0, noFather = 0;
+    const failed = [];
+
+    const worker = async () => {
+      for (;;) {
+        const row = queue.shift();
+        if (!row) return;
+        const guardian = stripKinPrefix(row.father_husband_name || "");
+        if (!guardian) {
+          noFather += 1; // the portal matches on Father Name — can't search without it
+        } else {
+          try {
+            const res = await fetch(PCC_CHECK_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                applicationNumber: normalizePccApplicationNumber(row.pcc_no),
+                applicantName: row.applicant_name,
+                guardianName: guardian,
+              }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || data.success === false) throw new Error(data.error || "Not found on the PCC portal");
+            const updates = await persistPccStatus(row, data.status);
+            if (updates && updates.pcc_status && updates.pcc_status !== row.pcc_status) {
+              changed += 1;
+              setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, ...updates } : r)));
+            } else {
+              unchanged += 1;
+              if (updates) setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, ...updates } : r)));
+            }
+          } catch (e) {
+            failed.push(row.applicant_name || row.draft_code);
+          }
+        }
+        done += 1;
+        setSyncProgress({ done, total: syncable.length });
+      }
+    };
+
+    await Promise.all(Array.from({ length: PCC_SYNC_CONCURRENCY }, worker));
+    setSyncProgress(null);
+    setSyncSummary({ total: syncable.length, changed, unchanged, noFather, failed });
+  };
+
   const openPccCheck = (row) => {
     if (isDraftPccNo(row.pcc_no)) {
       setNotice(`${row.applicant_name || row.draft_code} (${row.pcc_no}): this is a drafted PCC number — fee not paid yet, so it can't be tracked on the portal.`);
@@ -1992,6 +2087,28 @@ function DealerPccStatus({ dealerId, refreshKey = 0, fromYear = new Date().getFu
           );
         })}
       </div>
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <button
+          onClick={runSync}
+          disabled={syncing || syncable.length === 0}
+          title={syncable.length === 0 ? "No Under Verification applications to sync" : "Check the latest PCC status of all your Under Verification applications"}
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+          {syncing ? `Syncing ${syncProgress.done}/${syncProgress.total}…` : `Sync PCC (${syncable.length})`}
+        </button>
+        <span className="text-[11px] text-slate-400 dark:text-slate-500">Only Under Verification applications</span>
+      </div>
+      {syncSummary && (
+        <div className="mb-3 text-xs rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-500/10 text-blue-800 dark:text-blue-200 px-3 py-2 flex items-start justify-between gap-2">
+          <div>
+            Checked {syncSummary.total}: {syncSummary.changed} updated, {syncSummary.unchanged} unchanged
+            {syncSummary.noFather > 0 && `, ${syncSummary.noFather} skipped (Father Name missing)`}
+            {syncSummary.failed.length > 0 && `, ${syncSummary.failed.length} not found on portal (${syncSummary.failed.slice(0, 3).join(", ")}${syncSummary.failed.length > 3 ? "…" : ""})`}
+          </div>
+          <button onClick={() => setSyncSummary(null)} className="text-blue-400 hover:text-blue-600">×</button>
+        </div>
+      )}
       <div className="relative mb-3 max-w-sm">
         <input
           type="text"
