@@ -542,7 +542,7 @@ export default function DealerPortal({ dealer, identity, call, onLogout, pushTar
                 </button>
               ))}
             </div>
-            {ledgerSubTab === "My Ledger" && <DealerLedger dealerId={dealer.id} refreshKey={refreshKey} fromYear={fromYear} />}
+            {ledgerSubTab === "My Ledger" && <DealerLedger dealerId={dealer.id} dealerName={dealer.name} refreshKey={refreshKey} fromYear={fromYear} />}
             {ledgerSubTab === "Service" && <DealerServiceAmounts dealerId={dealer.id} fromYear={fromYear} />}
             {ledgerSubTab === "Payments" && <DealerPaymentHistory dealerId={dealer.id} refreshKey={refreshKey} fromYear={fromYear} />}
           </>
@@ -2924,7 +2924,7 @@ function DealerPaymentHistory({ dealerId, refreshKey = 0, fromYear = new Date().
   );
 }
 
-function DealerLedger({ dealerId, refreshKey = 0, fromYear = new Date().getFullYear() }) {
+function DealerLedger({ dealerId, dealerName = "", refreshKey = 0, fromYear = new Date().getFullYear() }) {
   const [txns, setTxns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -2978,7 +2978,9 @@ function DealerLedger({ dealerId, refreshKey = 0, fromYear = new Date().getFullY
     type: t.credit > 0 ? "credit" : "debit",
     amount: t.credit > 0 ? t.credit : t.debit,
     serviceCell: t.ledger_type || "—",
-    applicantCell: t.display_name || "—",
+    // A PAYMENT row is always shown under the dealer's OWN name — the stored
+    // display_name can be the UPI app used (PhonePe, GPay …) or a UTR number.
+    applicantCell: t.entry_type === "PAYMENT" && dealerName ? dealerName : (t.display_name || "—"),
   }));
 
   // Running balance walked chronologically (oldest first) regardless of
