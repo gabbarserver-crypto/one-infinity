@@ -253,6 +253,75 @@ function FatherCell({ row, onSave }) {
   );
 }
 
+// Inline-editable PCC No — only for Due rows (no PCC No yet: enter a draft no
+// or the actual PCC No directly) and Drafted rows (replace the draft no with the
+// actual one once the fee is paid). Every other row stays read-only here.
+// Enter / blur saves, Esc cancels. Empty on a Drafted row clears it (back to Due).
+function PccNoEditor({ row, onSave, editable = false, children }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const hasNo = !!String(row.pcc_no || "").trim();
+
+  const start = () => { setVal(plainPccNo(row.pcc_no)); setErr(""); setEditing(true); };
+  const commit = async () => {
+    if (saving) return;
+    const next = plainPccNo(val).replace(/\s+/g, "");
+    if (next === plainPccNo(row.pcc_no)) { setEditing(false); return; }
+    if (next && !/^\d{10,}$/.test(next)) { setErr("Digits only (12 = actual, 14 = drafted)"); return; }
+    setSaving(true);
+    try {
+      await onSave(row, next || null);
+      setEditing(false);
+    } catch (e) {
+      setErr(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editable) return <>{children}</>;
+
+  if (editing) {
+    return (
+      <span className="inline-block align-middle">
+        <input
+          autoFocus
+          value={val}
+          disabled={saving}
+          inputMode="numeric"
+          onChange={(e) => { setVal(e.target.value); setErr(""); }}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") { setErr(""); setVal(plainPccNo(row.pcc_no)); setEditing(false); }
+          }}
+          placeholder="Draft / PCC No"
+          className="w-40 rounded border border-blue-400 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+        />
+        {err && <div className="text-[10px] text-red-500 mt-0.5">{err}</div>}
+      </span>
+    );
+  }
+
+  return (
+    <>
+      {children}
+      <button
+        type="button"
+        onClick={start}
+        title={hasNo ? "Edit PCC No (replace drafted number with the actual one)" : "Add draft no or PCC No"}
+        className={hasNo
+          ? "ml-1.5 align-middle text-slate-400 hover:text-blue-500"
+          : "ml-2 align-middle text-xs text-slate-400 dark:text-slate-500 hover:text-blue-500 border border-dashed border-slate-300 dark:border-slate-700 rounded px-2 py-0.5"}
+      >
+        {hasNo ? <Pencil size={12} /> : "+ Add PCC No"}
+      </button>
+    </>
+  );
+}
+
 export default function PccApplications({ isAdmin = false, visibleNav = [] } = {}) {
   const [rows, setRows] = useState([]);
   const [rtoList, setRtoList] = useState([]);
@@ -527,6 +596,20 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
       .eq("id", row.id);
     if (err) throw err;
     setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, father_husband_name: name } : r)));
+  };
+
+  const savePccNo = async (row, no) => {
+    const updates = { pcc_no: no };
+    // A new/changed number starts fresh: old status/timeline belonged to the old number.
+    if (plainPccNo(row.pcc_no) !== (no || "")) {
+      updates.pcc_status = null;
+      updates.pcc_stage = null;
+      updates.pcc_timeline = null;
+    }
+    const { error: err } = await supabase.from("applications").update(updates).eq("id", row.id);
+    if (err) throw err;
+    setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, ...updates } : r)));
+    setRowNotice({ ok: true, text: `${row.draft_code}: ${no ? `PCC No saved (${no})${isDraftPcc(no) ? " — drafted number" : ""}` : "PCC No cleared"}.` });
   };
 
   // "Mark as Not Required": same pcc_not_required flag the Applications page's
@@ -862,6 +945,7 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{r.application_no || ""}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{r.ll_dl_no || ""}</td>
                       <td className="px-3 py-2 whitespace-nowrap">
+                        <PccNoEditor row={r} onSave={savePccNo} editable={!r.pcc_no || (isDraftPcc(r.pcc_no) && !r.pcc_certificate_path)}>
                         {r.pcc_no ? (
                           <>
                           <button
@@ -889,6 +973,7 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
                         ) : (
                           <span className="text-slate-300 dark:text-slate-600">—</span>
                         )}
+                        </PccNoEditor>
                         {/* Only for Due rows (no PCC No yet) — a row that already has a PCC No is needed. */}
                         {!r.pcc_no && (
                           <button
