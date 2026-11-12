@@ -127,7 +127,7 @@ function EditableCell({ value, onSave, type = "text", width = "w-24", placeholde
       title={disabled ? "Not required" : readOnly ? (readOnlyTitle || "Locked after approval") : (!canEdit ? "You don't have edit access for this section" : undefined)}
       onChange={(e) => setVal(e.target.value)}
       onBlur={() => { if (String(val) !== String(value ?? "")) onSave(val); }}
-      className={`${effWidth} rounded border px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 ${noSpinner ? "no-spinner" : ""} ${
+      className={`${effWidth} rounded border px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 ${noSpinner || type === "number" ? "no-spinner" : ""} ${
         locked
           ? "border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 text-slate-400 dark:text-slate-500 placeholder:text-slate-300 dark:placeholder:text-slate-600 cursor-not-allowed"
           : "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100"
@@ -2526,7 +2526,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                       noSpinner
                       value={r.rto_fee}
                       disabled={isPccService(r.services)}
-                      readOnly={!!r.rto_fee}
+                      readOnly={r.rto_fee !== null && r.rto_fee !== undefined && r.rto_fee !== ""}
                       readOnlyTitle={FILLED_LOCK_TITLE}
                       onSave={(v) => updateRowField(r.id, "rto_fee", v === "" ? null : parseFloat(v))}
                     />
@@ -2552,7 +2552,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                       width="w-20"
                       value={r.agency_fee}
                       disabled={!r.services?.agency_required}
-                      readOnly={!!r.agency_fee}
+                      readOnly={r.agency_fee !== null && r.agency_fee !== undefined && r.agency_fee !== ""}
                       readOnlyTitle={FILLED_LOCK_TITLE}
                       onSave={(v) => updateAgencyFee(r, v)}
                     />
