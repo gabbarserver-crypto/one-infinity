@@ -2148,7 +2148,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold border flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border flex items-center gap-1.5 ${t === "Accepted" ? "max-md:hidden" : ""} ${
                   tab === t ? "bg-slate-900 text-white border-slate-900 dark:bg-indigo-600 dark:border-indigo-300 dark:ring-2 dark:ring-indigo-400/40" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700"
                 }`}
               >
@@ -2180,7 +2180,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
             <button
               onClick={() => setCompactView((c) => !c)}
               title="Toggle a denser, grouped-column table layout"
-              className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+              className={`max-md:hidden px-3 py-1.5 rounded-full text-xs font-semibold border ${
                 compactView ? "bg-violet-600 text-white border-violet-600" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700"
               }`}
             >
@@ -2255,14 +2255,14 @@ export default function Applications({ restricted = false, canEdit = true, canAp
           Filter{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
         </GhostButton>
         {!restricted && (
-          <GhostButton onClick={exportApplicationsXlsx} title="Export the currently filtered and sorted applications as Excel">
+          <GhostButton className="max-md:hidden" onClick={exportApplicationsXlsx} title="Export the currently filtered and sorted applications as Excel">
             ⬇ Export Excel
           </GhostButton>
         )}
-        {canEdit && !restricted && <GhostButton onClick={() => setShowImport(true)}>⬆ Import CSV</GhostButton>}
-        {canEdit && !restricted && <GhostButton onClick={() => setShowUpdateCsv(true)}>✎ Update via CSV</GhostButton>}
+        {canEdit && !restricted && <GhostButton className="max-md:hidden" onClick={() => setShowImport(true)}>⬆ Import CSV</GhostButton>}
+        {canEdit && !restricted && <GhostButton className="max-md:hidden" onClick={() => setShowUpdateCsv(true)}>✎ Update via CSV</GhostButton>}
         {!restricted && !onlyDraft && (
-          <div className="relative">
+          <div className="relative max-md:hidden">
             <GhostButton onClick={() => setShowColumnPicker((s) => !s)}>Columns</GhostButton>
             {showColumnPicker && (
               <>

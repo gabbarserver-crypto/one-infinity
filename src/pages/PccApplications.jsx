@@ -156,11 +156,11 @@ async function checkOnePcc(row) {
 const PCC_FILTERS = [
   { key: "", label: "All" },
   { key: "__none__", label: "Due" },
-  { key: "Under Verification", label: "Under Verification" },
+  { key: "__draft__", label: "Drafted" },
   { key: "Certificate Issued", label: "Issued" },
   { key: "Rejected", label: "Rejected" },
+  { key: "Under Verification", label: "Under Verification" },
   { key: "Police Case", label: "Police Case" },
-  { key: "__draft__", label: "Drafted" },
 ];
 
 // Application date if set, otherwise the day it was submitted (in IST).
@@ -170,11 +170,11 @@ function rowDateISO(r) {
   return "";
 }
 
-function SortTh({ column, label, sortKey, sortDir, onSort }) {
+function SortTh({ column, label, sortKey, sortDir, onSort, className = "" }) {
   const active = sortKey === column;
   const Icon = active ? (sortDir === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
   return (
-    <th className="text-left font-medium px-3 py-2 whitespace-nowrap">
+    <th className={`text-left font-medium px-3 py-2 whitespace-nowrap ${className}`}>
       <button
         onClick={() => onSort(column)}
         className={`flex items-center gap-1 hover:text-slate-700 dark:hover:text-slate-200 ${active ? "text-slate-800 dark:text-slate-100 font-semibold" : ""}`}
@@ -496,8 +496,8 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortKey(key); setSortDir("asc"); }
   };
-  const th = (column, label) => (
-    <SortTh column={column} label={label} sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+  const th = (column, label, className = "") => (
+    <SortTh column={column} label={label} sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={className} />
   );
 
   const countFor = (key) => {
@@ -774,7 +774,7 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
             onClick={exportExcel}
             disabled={loading || sorted.length === 0}
             title="Export the currently filtered and sorted list as Excel"
-            className="!px-3 !py-2 !text-sm inline-flex items-center gap-1.5"
+            className="max-md:hidden !px-3 !py-2 !text-sm inline-flex items-center gap-1.5"
           >
             <Download size={14} /> Export Excel
           </GhostButton>
@@ -908,14 +908,14 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/60 text-xs text-slate-500 dark:text-slate-400">
-                {th("draft", "Draft ID")}
+                {th("draft", "Draft ID", "max-md:hidden")}
                 {th("date", "Date")}
                 {showAmount && th("amount", "Amount")}
                 {th("dealer", "Dealer")}
                 {th("service", "Service")}
                 {th("applicant", "Applicant")}
                 {th("father", "Father Name")}
-                {th("application", "Application")}
+                {th("application", "Application", "max-md:hidden")}
                 {th("lldl", "LL/DL No.")}
                 {th("pccno", "PCC No")}
                 {th("status", "Status")}
@@ -932,7 +932,7 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
                   const justUpdated = updatedIds.has(r.id);
                   return (
                     <tr key={r.id} className={`border-t border-slate-100 dark:border-slate-800 ${justUpdated ? "bg-green-50 dark:bg-green-500/10 shadow-[inset_3px_0_0_0_#22c55e]" : "hover:bg-slate-50/60 dark:hover:bg-slate-800/30"}`}>
-                      <td className="px-3 py-2 whitespace-nowrap font-semibold text-blue-600 dark:text-blue-400">{r.draft_code}</td>
+                      <td className="max-md:hidden px-3 py-2 whitespace-nowrap font-semibold text-blue-600 dark:text-blue-400">{r.draft_code}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{isoToDDMMYYYY(rowDateISO(r))}</td>
                       {showAmount && <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{r.amount ?? ""}</td>}
                       <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{dealerLabel(r.dealers)}</td>
@@ -942,7 +942,7 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
                         {justUpdated && <span className="ml-1.5 rounded bg-green-600 text-white text-[10px] font-bold px-1.5 py-0.5 align-middle">UPDATED</span>}
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300"><FatherCell row={r} onSave={saveFatherName} /></td>
-                      <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{r.application_no || ""}</td>
+                      <td className="max-md:hidden px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{r.application_no || ""}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{r.ll_dl_no || ""}</td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         <PccNoEditor row={r} onSave={savePccNo} editable={!r.pcc_no || (isDraftPcc(r.pcc_no) && !r.pcc_certificate_path)}>
