@@ -3,6 +3,8 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from "react"
 import { supabase } from "../lib/supabase";
 import { Card, Field, GhostButton, PrimaryButton, Modal } from "../components/UI";
 import { DealerForm, AgencyForm } from "./Masters";
+import PaymentRegisters from "../components/PaymentRegisters";
+import Payments from "./Payments";
 import { todayIST, fmtDate, istDayStart, istNextDayStart } from "../lib/dates";
 import { fetchAllRows } from "../lib/fetchAll";
 
@@ -57,7 +59,7 @@ function exportLedgerCSV(entityName, rows, serialMode = false) {
 // double-entry pairs, no more type/name buried in free text) via the
 // dealer_ledger / agency_ledger views, which already compute debit,
 // credit, and running_balance server-side.
-export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) {
+export default function Ledger({ only, initialEntityId, isAdmin = false, staff } = {}) {
   const [entityId, setEntityId] = useState(initialEntityId || "");
   const [entityMode, setEntityMode] = useState(only === "agency" ? "agency" : "dealer"); // "dealer" | "agency"
   // Screenshot mode: hide the Draft No + Entry Code columns (remembered on this device).
@@ -311,6 +313,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
   useEffect(() => {
     (async () => {
       if (!entityId) { setSummary(null); setRowsState([]); return; }
+      if (entityMode !== "dealer" && entityMode !== "agency") return; // Bank / Cash / register tabs have no single-entity ledger
       if (entityMode === "dealer") {
         const { data: dealerRow } = await supabase.from("dealers").select("name, credit_limit").eq("id", entityId).maybeSingle();
         if (dealerRow?.name) setEntityName(dealerRow.name);
@@ -427,7 +430,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
   return (
     <div>
       {!only && (
-        <div className="no-print flex gap-2 mb-4">
+        <div className="no-print flex flex-wrap gap-2 mb-4">
           <button
             onClick={() => setEntityMode("dealer")}
             className={`px-4 py-2 rounded-lg text-sm font-semibold ${
@@ -460,11 +463,38 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
           >
             Cash
           </button>
+          <button
+            onClick={() => setEntityMode("bankTxns")}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+              entityMode === "bankTxns" ? "bg-blue-600 text-white" : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+            }`}
+          >
+            Bank Transactions
+          </button>
+          <button
+            onClick={() => setEntityMode("allPayments")}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+              entityMode === "allPayments" ? "bg-blue-600 text-white" : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+            }`}
+          >
+            All Receipts &amp; Payments
+          </button>
+          <button
+            onClick={() => setEntityMode("recordPayment")}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+              entityMode === "recordPayment" ? "bg-blue-600 text-white" : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+            }`}
+          >
+            Record Payment
+          </button>
         </div>
       )}
 
       {(only === "bank" || (!only && entityMode === "bank")) && <BankTab />}
       {!only && entityMode === "cash" && <CashTab />}
+      {!only && entityMode === "bankTxns" && <PaymentRegisters view="bank" isAdmin={isAdmin} />}
+      {!only && entityMode === "allPayments" && <PaymentRegisters view="all" isAdmin={isAdmin} />}
+      {!only && entityMode === "recordPayment" && <Payments staff={staff} />}
 
       {(only === "dealer" || (!only && entityMode === "dealer")) && (
         <SundryHead
@@ -496,7 +526,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false } = {}) 
         />
       )}
 
-      {entityId && (
+      {entityId && (entityMode === "dealer" || entityMode === "agency") && (
         <div className="mt-6" ref={ledgerDetailRef}>
           <div className="no-print flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">{entityName || "Ledger"}</h3>

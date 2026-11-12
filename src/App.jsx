@@ -14,7 +14,6 @@ import Dashboard from "./pages/Dashboard";
 import Applications, { StaffApplications, StaffDraftApplications, DraftApplications } from "./pages/Applications";
 import PccApplications from "./pages/PccApplications";
 import { LearningApplications, DlApplications } from "./pages/LicenceApplications";
-import Payments from "./pages/Payments";
 import Ledger from "./pages/Ledger";
 import Masters from "./pages/Masters";
 import Settings from "./pages/Settings";
@@ -72,7 +71,6 @@ const NAV = [
   { key: "dlApplications", label: "DL", Component: DlApplications },
   { key: "chats", label: "Call/Chat", Component: Chats },
   { key: "masters", label: "Masters", Component: Masters },
-  { key: "payments", label: "Payments", Component: Payments },
   { key: "ledger", label: "Ledger", Component: Ledger },
   { key: "dealerLedger", label: "Dealer", Component: DealerLedgerPage },
   { key: "agencyLedger", label: "Agency", Component: AgencyLedgerPage },
@@ -107,7 +105,6 @@ const MODULE_BY_NAV_KEY = {
   dlApplications: "applications",
   chats: "chats",
   masters: "masters",
-  payments: "payments",
   ledger: "ledger",
   dealerLedger: "ledger",
   agencyLedger: "ledger",
@@ -306,7 +303,7 @@ export default function App() {
             kind: "payment",
             title: "Payment received (QR)",
             body: `${p.payer_name || "A dealer"} — ${amountLabel}`,
-            onClick: () => setActive("payments"),
+            onClick: () => setActive("ledger"),
           });
         }
       )

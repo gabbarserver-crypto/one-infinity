@@ -8,10 +8,10 @@ import { identityFor } from "../lib/chat";
 import { Phone, MessageCircle } from "lucide-react";
 import { createDealerLogin, createDealerStaffLogin } from "../lib/serverApi";
 
-const TABS = ["RTO", "Staff", "Service", "Dealer", "Agency"];
+const TABS = ["Dealer", "RTO", "Staff", "Service", "Agency"];
 
 export default function Masters({ call, staff }) {
-  const [tab, setTab] = usePersistedState(MASTERS_TAB_KEY, "RTO", TABS);
+  const [tab, setTab] = usePersistedState(MASTERS_TAB_KEY, "Dealer", TABS);
   const [toast, setToast] = useState(null);
 
   const notify = (msg) => setToast(msg);
