@@ -47,6 +47,14 @@ function mapToSteps(status) {
   }));
 }
 
+// Completed portal steps (with their dates) for a saved application row, in
+// portal order — used to show the progress right in the PCC table's Status
+// column, without opening the Track Application popup.
+export function getPccDoneSteps(row) {
+  if (!row || !Array.isArray(row.pcc_timeline) || !row.pcc_timeline.length) return [];
+  return mapToSteps({ timeline: row.pcc_timeline }).filter((s) => s.done);
+}
+
 // Delhi Police's portal expects the FULL application number including the
 // "DLSB-PCC/" prefix (e.g. "DLSB-PCC/202605030627"). Our pcc_no field is often
 // stored as just the trailing number, so add the prefix back if it's missing.

@@ -11,7 +11,7 @@ import { Card, StatusBadge, GhostButton } from "../components/UI";
 import { fetchAllRows } from "../lib/fetchAll";
 import { todayIST } from "../lib/dates";
 import { SERVER_API_BASE } from "../lib/serverApi";
-import PCCStatusCheckModal, { normalizePccApplicationNumber, stripKinPrefix, persistPccStatus, getPccRejectReason } from "../components/PCCStatusCheckModal";
+import PCCStatusCheckModal, { normalizePccApplicationNumber, stripKinPrefix, persistPccStatus, getPccRejectReason, getPccDoneSteps } from "../components/PCCStatusCheckModal";
 import * as XLSX from "xlsx";
 import { ArrowUp, ArrowDown, ArrowUpDown, RefreshCw, Pencil, Download, Loader2, Upload, Ban } from "lucide-react";
 import {
@@ -994,6 +994,17 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
                           <StatusBadge status={r.status} />
                           {stage && <span className={`text-[11px] font-medium whitespace-nowrap ${stageTextClass(r)}`}>{stage}</span>}
                         </div>
+                        {getPccDoneSteps(r).length > 0 && (
+                          <ul className="mt-1 space-y-0.5">
+                            {getPccDoneSteps(r).map((s) => (
+                              <li key={s.label} className="text-[11px] leading-tight whitespace-nowrap">
+                                <span className="text-emerald-500 mr-1">✓</span>
+                                <span className="text-slate-700 dark:text-slate-200">{s.label}</span>
+                                {s.timestamp && <span className="ml-1.5 text-blue-600 dark:text-blue-400">{s.timestamp}</span>}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                         {getPccRejectReason(r) && (
                           <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5 max-w-xs whitespace-normal">
                             Reason: {getPccRejectReason(r)}
