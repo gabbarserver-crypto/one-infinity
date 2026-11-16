@@ -84,17 +84,21 @@ function isClosedText(r) {
 //            -> Under Process (RTO fee unpaid) -> Pending (no number yet)
 //  DL:       Issued -> Hold -> Closed (reason typed + amount filled)
 //            -> Pending (amount not filled)
+//            -> Waiting for RTO Approval (RTO has Slot Booking = No: auto mode)
 //            -> Upcoming Slot (slot date written and it is today or ahead)
 //            -> Waiting for RTO Approval (RTO fee unpaid - was "Under Process")
 //            -> Waiting for Slot Booking (no slot date written yet)
 //            -> Waiting for RTO Approval (slot date is over)
-function bucketOf(r, isDl, today) {
+function bucketOf(r, isDl, today, noSlotRtoIds) {
   if (isIssued(r)) return "issued";
   if (isClosedText(r)) return "closed";
   if (r.status === "On Hold" || isHoldText(r)) return "hold";
   if (hasReasonText(r) && amountFilled(r)) return "closed";
   if (isDl) {
     if (!amountFilled(r)) return "pending";
+    // RTO marked "Slot Booking: No" in Masters (auto mode - DL Renew / Dup /
+    // Add class etc. only pay the normal fee, no slot) -> straight to RTO.
+    if (r.rto_id && noSlotRtoIds && noSlotRtoIds.has(r.rto_id)) return "approval";
     const iso = slotISO(r.slot_time);
     if (iso && iso >= today) return "upcoming";
     if (!feePaid(r)) return "approval"; // same category as "Waiting for RTO Approval"
@@ -160,7 +164,7 @@ function learningDownloadUrl(fileUrl) {
   }
 }
 
-function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true }) {
+function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, staff = null }) {
   const isDl = kind === "dl";
   const matcher = isDl ? DL_RE : LL_RE;
   const emptyText = isDl ? "No DL applications found." : "No Learning applications found.";
@@ -188,7 +192,7 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true })
       setError("");
       setRows([]);
       const [{ data: rt }, { data: svc, error: svcErr }] = await Promise.all([
-        supabase.from("rtos").select("id, name").order("name"),
+        supabase.from("rtos").select("id, name, slot_booking").order("name"),
         supabase.from("services").select("id, parent_service, short_name"),
       ]);
       if (cancelled) return;
@@ -276,7 +280,38 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true })
     await saveRtoSlot(r.id, { slot_time: t || null });
   };
 
-  const bucketOfRow = (r) => bucketOf(r, isDl, today);
+  // RTOs set to "Slot Booking: No" in Masters (auto mode) - slot is disabled.
+  const noSlotRtoIds = useMemo(
+    () => new Set(rtoList.filter((x) => x.slot_booking === false).map((x) => x.id)),
+    [rtoList]
+  );
+  const isNoSlotRow = (r) => !!r.rto_id && noSlotRtoIds.has(r.rto_id);
+  const bucketOfRow = (r) => bucketOf(r, isDl, today, noSlotRtoIds);
+
+  // Waiting for RTO Approval rows: LL/DL No. can be typed right here.
+  const canEditLlDl = (r) =>
+    isDl && canEdit && bucketOf(r, isDl, today, noSlotRtoIds) === "approval" && !String(r.ll_dl_no || "").trim();
+  const saveLlDl = async (r, raw) => {
+    const t = String(raw || "").trim();
+    if (!t) return;
+    const fields = { ll_dl_no: t };
+    if (staff?.id) {
+      fields.ll_dl_no_entered_by = staff.id;
+      fields.ll_dl_no_entered_at = new Date().toISOString();
+    }
+    const ok = await saveRtoSlot(r.id, fields);
+    if (!ok) return;
+    // Same as the Applications page: a typed LL/DL No. completes an Accepted
+    // application (posts it to the dealer ledger).
+    if (r.status === "Accepted") {
+      const { error: cErr } = await supabase.rpc("complete_application", { p_application_id: r.id });
+      if (cErr) { setToast("DL No. saved, but auto-complete failed: " + cErr.message); return; }
+      setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, status: "Completed" } : x)));
+      setToast("DL No. saved — application completed");
+    } else {
+      setToast("DL No. saved");
+    }
+  };
   const countFor = (key) => (key === "" ? rows.length : rows.filter((r) => bucketOfRow(r) === key).length);
 
   const filtered = useMemo(() => {
@@ -440,7 +475,15 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true })
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{r.rto_fee ?? ""}</td>
                       <td className="px-3 py-2 whitespace-nowrap">
-                        {r.ll_dl_no && learningDocs[r.id] ? (
+                        {canEditLlDl(r) ? (
+                          <input
+                            type="text"
+                            placeholder="DL No."
+                            onBlur={(e) => saveLlDl(r, e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                            className="w-40 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 px-2 py-1 text-sm"
+                          />
+                        ) : r.ll_dl_no && learningDocs[r.id] ? (
                           <a
                             href={learningDownloadUrl(learningDocs[r.id])}
                             target="_blank"
@@ -466,7 +509,10 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true })
                           {canEditRtoSlot(r) ? (
                             <select
                               value={r.rto_id || ""}
-                              onChange={(e) => saveRtoSlot(r.id, { rto_id: e.target.value || null })}
+                              onChange={(e) => {
+                                const v = e.target.value || null;
+                                saveRtoSlot(r.id, noSlotRtoIds.has(v) ? { rto_id: v, slot_time: null } : { rto_id: v });
+                              }}
                               className="w-40 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 px-2 py-1 text-sm"
                             >
                               <option value="">— Select RTO —</option>
@@ -477,7 +523,9 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true })
                       )}
                       {isDl && (
                         <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">
-                          {canEditRtoSlot(r) ? (
+                          {isNoSlotRow(r) ? (
+                            <span className="text-slate-400 dark:text-slate-500 italic">No slot (auto)</span>
+                          ) : canEditRtoSlot(r) ? (
                             <input
                               key={`${r.id}-${r.slot_time || ""}`}
                               type="text"
@@ -527,17 +575,19 @@ export async function fetchUpcomingSlotCount() {
   if (svcErr) throw svcErr;
   const ids = (svc || []).filter((s) => DL_RE.test(serviceText(s))).map((s) => s.id);
   if (ids.length === 0) return 0;
+  const { data: rt } = await supabase.from("rtos").select("id, slot_booking");
+  const noSlotRtoIds = new Set((rt || []).filter((x) => x.slot_booking === false).map((x) => x.id));
   const res = await fetchAllRows(() =>
     supabase
       .from("applications")
-      .select("id, amount, rto_fee, status, ll_dl_no, slot_time")
+      .select("id, amount, rto_fee, status, ll_dl_no, slot_time, rto_id")
       .in("service_id", ids)
       .not("slot_time", "is", null)
       .order("id", { ascending: false })
   );
   if (res.error) throw res.error;
   const today = todayIST();
-  return (res.data || []).filter((r) => bucketOf(r, true, today) === "upcoming").length;
+  return (res.data || []).filter((r) => bucketOf(r, true, today, noSlotRtoIds) === "upcoming").length;
 }
 
 export function LearningApplications(props) {
