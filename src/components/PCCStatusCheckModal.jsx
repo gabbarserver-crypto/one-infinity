@@ -283,7 +283,38 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
       const fresh = await runCheck();
       const url = fresh?.status?.certificateUrl;
       if (url) {
-        window.open(url, "_blank", "noopener,noreferrer");
+        // One click = download + save to our records. Needs the portal login
+        // in this browser; if the browser blocks reading the PDF (CORS /
+        // not logged in), fall back to opening it so it can still be
+        // downloaded and saved by hand.
+        let saved = false;
+        try {
+          const r = await fetch(url, { credentials: "include" });
+          const buf = await r.arrayBuffer();
+          if (!r.ok || new TextDecoder("latin1").decode(buf.slice(0, 4)) !== "%PDF") throw new Error("not a pdf");
+          const blob = new Blob([buf], { type: "application/pdf" });
+          const blobUrl = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = blobUrl;
+          a.download = `${String(applicationNumber).replace(/^DLSB-PCC\//i, "").trim() || "PCC"}.pdf`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+          if (!row.pcc_certificate_path || !certSaved) {
+            setSavingCert(true);
+            await saveCertificateFile(row.id, new File([blob], "certificate.pdf", { type: "application/pdf" }));
+            setCertSaved(true);
+            onCertificateSaved?.(row.id);
+          }
+          saved = true;
+        } catch {
+          window.open(url, "_blank", "noopener,noreferrer");
+          setError("Auto-save nahi hua (portal login / browser block). PDF download karke 'Save Certificate to DB' dabayein.");
+        } finally {
+          setSavingCert(false);
+        }
+        if (saved) setError(null);
       } else {
         setError("Couldn't get a fresh certificate link — try Search Application again.");
       }
@@ -413,7 +444,7 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
                     onClick={handleDownload}
                     className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-semibold rounded-lg px-4 py-2 text-sm"
                   >
-                    {downloading ? "Getting link…" : "⬇ Download Certificate"}
+                    {downloading ? "Downloading & saving…" : "⬇ Download & Save Certificate"}
                   </button>
                 )}
                 {!isRejected && <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleCertFileChosen} />}
