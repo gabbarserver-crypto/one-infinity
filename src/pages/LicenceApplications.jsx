@@ -252,14 +252,13 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
       // the "sarathi fill" bookmark reads "SARATHI|<appNo>|<DOB>" from it.
       try { await navigator.clipboard.writeText(`SARATHI|${appNo}|${dob}`); setToast("Copied — Sarathi page khulne par \"sarathi fill\" bookmark click karein"); } catch { /* clipboard may be blocked */ }
     }
-    // DL page: "q" opens Related Applications Search (captcha only, shows the
-    // issued DL No.) - no OTP from the customer. Learning keeps "as" (Application
-    // Status, which sends an OTP).
-    const param = isDl ? "q" : "as";
-    window.open(
-      `https://sarathi.parivahan.gov.in/sarathiservice/applicationredirect.do?${param}=${encodeURIComponent(appNo)}${hash}`,
-      "_blank", "noopener,noreferrer"
-    );
+    // DL page: opens "Related Applications Search" (relatedAppln.do) directly -
+    // captcha only, shows the issued DL No., no OTP from the customer.
+    // Learning keeps "as" (Application Status, which sends an OTP).
+    const url = isDl
+      ? `https://sarathi.parivahan.gov.in/sarathiservice/relatedAppln.do${hash}`
+      : `https://sarathi.parivahan.gov.in/sarathiservice/applicationredirect.do?as=${encodeURIComponent(appNo)}${hash}`;
+    window.open(url, "_blank", "noopener,noreferrer");
   };
 
   // LL/DL No with no stored file -> Sarathi's Learning download page.
