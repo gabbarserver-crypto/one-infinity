@@ -83,9 +83,10 @@ function isClosedText(r) {
 //  Learning: Issued -> Hold -> Closed (reason typed + amount filled)
 //            -> Under Process (RTO fee unpaid) -> Pending (no number yet)
 //  DL:       Issued -> Hold -> Closed (reason typed + amount filled)
-//            -> Pending (amount not filled) -> Under Process (RTO fee unpaid)
-//            -> Waiting for Slot Booking (amount + RTO fee paid, slot not booked
-//               yet OR slot date still ahead)
+//            -> Pending (amount not filled)
+//            -> Upcoming Slot (slot date written and it is today or ahead)
+//            -> Waiting for RTO Approval (RTO fee unpaid - was "Under Process")
+//            -> Waiting for Slot Booking (no slot date written yet)
 //            -> Waiting for RTO Approval (slot date is over)
 function bucketOf(r, isDl, today) {
   if (isIssued(r)) return "issued";
@@ -94,9 +95,10 @@ function bucketOf(r, isDl, today) {
   if (hasReasonText(r) && amountFilled(r)) return "closed";
   if (isDl) {
     if (!amountFilled(r)) return "pending";
-    if (!feePaid(r)) return "process";
-    if (!String(r.slot_time || "").trim()) return "slotbooking";
     const iso = slotISO(r.slot_time);
+    if (iso && iso >= today) return "upcoming";
+    if (!feePaid(r)) return "approval"; // same category as "Waiting for RTO Approval"
+    if (!String(r.slot_time || "").trim()) return "slotbooking";
     return iso && iso < today ? "approval" : "slotbooking";
   }
   return feePaid(r) ? "pending" : "process";
@@ -108,6 +110,7 @@ const BUCKET_LABEL = {
   pending: "Pending",
   process: "Under Process",
   slotbooking: "Waiting for Slot Booking",
+  upcoming: "Upcoming Slot",
   approval: "Waiting for RTO Approval",
   hold: "Hold",
 };
@@ -117,11 +120,12 @@ const BUCKET_STYLE = {
   pending: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
   process: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
   slotbooking: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
+  upcoming: "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300",
   approval: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
   hold: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
 };
 const FILTERS_LL = ["", "issued", "closed", "pending", "process", "hold"];
-const FILTERS_DL = ["", "issued", "closed", "pending", "slotbooking", "process", "approval", "hold"];
+const FILTERS_DL = ["", "issued", "closed", "pending", "slotbooking", "upcoming", "approval", "hold"];
 
 function SortTh({ column, label, sortKey, sortDir, onSort }) {
   const active = sortKey === column;
@@ -261,6 +265,8 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true })
     const { error: upErr } = await supabase.from("applications").update(fields).eq("id", id);
     if (upErr) { setToast("Failed to update: " + upErr.message); return false; }
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...fields } : r)));
+    // Let the sidebar's red "Upcoming Slot" count refresh right away.
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("dl-slots-changed"));
     return true;
   };
   const saveSlot = async (r, raw) => {
@@ -512,6 +518,26 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true })
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>
   );
+}
+
+// Number of DL applications in the "Upcoming Slot" bucket — shown as the red
+// badge on the DL item in the sidebar.
+export async function fetchUpcomingSlotCount() {
+  const { data: svc, error: svcErr } = await supabase.from("services").select("id, parent_service, short_name");
+  if (svcErr) throw svcErr;
+  const ids = (svc || []).filter((s) => DL_RE.test(serviceText(s))).map((s) => s.id);
+  if (ids.length === 0) return 0;
+  const res = await fetchAllRows(() =>
+    supabase
+      .from("applications")
+      .select("id, amount, rto_fee, status, ll_dl_no, slot_time")
+      .in("service_id", ids)
+      .not("slot_time", "is", null)
+      .order("id", { ascending: false })
+  );
+  if (res.error) throw res.error;
+  const today = todayIST();
+  return (res.data || []).filter((r) => bucketOf(r, true, today) === "upcoming").length;
 }
 
 export function LearningApplications(props) {

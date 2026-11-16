@@ -13,7 +13,7 @@ import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import Applications, { StaffApplications, StaffDraftApplications, DraftApplications } from "./pages/Applications";
 import PccApplications from "./pages/PccApplications";
-import { LearningApplications, DlApplications } from "./pages/LicenceApplications";
+import { LearningApplications, DlApplications, fetchUpcomingSlotCount } from "./pages/LicenceApplications";
 import Ledger from "./pages/Ledger";
 import Masters from "./pages/Masters";
 import Settings from "./pages/Settings";
@@ -154,6 +154,8 @@ export default function App() {
   // Count of applications still sitting in "Draft Submitted" — shown as a
   // badge on the Draft tab, mirroring the Call/Chat unread badge.
   const [pendingDraftCount, setPendingDraftCount] = useState(0);
+  // DL applications whose slot date is today or ahead — red badge on DL.
+  const [upcomingSlotCount, setUpcomingSlotCount] = useState(0);
   const [permMap, setPermMap] = useState({}); // { [module]: permissions row } for the staff member's role
   const roleName = staff?.roles?.role_name || null;
   const isAdmin = roleName === "Admin";
@@ -226,6 +228,25 @@ export default function App() {
       // Best-effort — same as chat count, leave the last-known value in place.
     }
   }, []);
+
+  const refreshUpcomingSlotCount = useCallback(async () => {
+    try {
+      setUpcomingSlotCount(await fetchUpcomingSlotCount());
+    } catch {
+      // Best-effort — leave the last-known value in place.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!staff) return;
+    refreshUpcomingSlotCount();
+    const slotInterval = setInterval(refreshUpcomingSlotCount, 60000);
+    window.addEventListener("dl-slots-changed", refreshUpcomingSlotCount);
+    return () => {
+      clearInterval(slotInterval);
+      window.removeEventListener("dl-slots-changed", refreshUpcomingSlotCount);
+    };
+  }, [staff, refreshUpcomingSlotCount]);
 
   useEffect(() => {
     if (!staff) return;
@@ -625,9 +646,9 @@ export default function App() {
       <Sidebar
         nav={visibleNav.filter((n) => n.key !== "dealerLedger" && n.key !== "agencyLedger")}
         active={active}
-        onNavigate={(key) => { setActive(key); refreshPendingChatCount(); refreshPendingDraftCount(); }}
+        onNavigate={(key) => { setActive(key); refreshPendingChatCount(); refreshPendingDraftCount(); refreshUpcomingSlotCount(); }}
         staff={staff}
-        badges={{ chats: pendingChatCount, draftApplications: pendingDraftCount, staffDraftApplications: pendingDraftCount }}
+        badges={{ chats: pendingChatCount, draftApplications: pendingDraftCount, staffDraftApplications: pendingDraftCount, dlApplications: upcomingSlotCount }}
         onLogout={() => supabase.auth.signOut()}
       />
       <main
@@ -641,7 +662,7 @@ export default function App() {
           initialEntityId={initialEntityId}
           call={directCall}
           visibleNav={visibleNav}
-          onNavigate={(key) => { setActive(key); refreshPendingChatCount(); refreshPendingDraftCount(); }}
+          onNavigate={(key) => { setActive(key); refreshPendingChatCount(); refreshPendingDraftCount(); refreshUpcomingSlotCount(); }}
           active={active}
           isAdmin={isAdmin}
         />
@@ -654,7 +675,7 @@ export default function App() {
           setActive(key);
           refreshPendingChatCount();
         }}
-        badges={{ chats: pendingChatCount, draftApplications: pendingDraftCount, staffDraftApplications: pendingDraftCount }}
+        badges={{ chats: pendingChatCount, draftApplications: pendingDraftCount, staffDraftApplications: pendingDraftCount, dlApplications: upcomingSlotCount }}
       />
       <CommsWindow
         ref={commsWindowRef}
