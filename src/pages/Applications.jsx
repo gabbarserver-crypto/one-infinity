@@ -4403,7 +4403,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
   const saveApplicant = async () => {
     const dobIso = ddmmyyyyToISO(applicant.date_of_birth);
     const err = validateAgeForService(dobIso, app.services);
-    if (err) { setApplicantAgeError(err); return; }
+    if (err) { setApplicantAgeError(err); return false; }
     setApplicantAgeError("");
     setSavingApplicant(true);
     await onSaveApplicant({
@@ -4416,6 +4416,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
       stay_since: ddmmyyyyToISO(applicant.stay_since),
     });
     setSavingApplicant(false);
+    return true;
   };
 
   const [answers, setAnswers] = useState(() => {
@@ -4441,6 +4442,24 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
     await onSaveAnswers(answersObj);
     setSavingAnswers(false);
   };
+
+  // ONE Save for the whole popup: applicant details + service answers (+ the
+  // staff assignment in the admin popup). Operational Details fields still
+  // save by themselves as soon as they are edited.
+  const saveAll = async () => {
+    const ok = await saveApplicant();
+    if (ok === false) return;
+    await saveAnswers();
+    if (mode === "admin" && onAssign && staffId !== (app.assigned_staff_id || "")) await onAssign(staffId || null);
+  };
+  const SaveBar = (
+    <div className="sticky bottom-0 -mx-6 -mb-6 mt-4 px-6 py-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3 z-10">
+      {applicantAgeError && <span className="text-rose-500 text-xs">{applicantAgeError}</span>}
+      <PrimaryButton disabled={savingApplicant || savingAnswers} onClick={saveAll}>
+        {savingApplicant || savingAnswers ? "Saving…" : "Save"}
+      </PrimaryButton>
+    </div>
+  );
 
   // Same fields that lock in the table once filled (see FILLED_LOCK_TITLE
   // near EditableCell) — always editable here regardless of whether they
@@ -4700,8 +4719,12 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
               <span className="font-bold">{dealerLabel(app.dealers) || "—"}</span>
             )}
           </span>
-          <span><span className="font-semibold text-slate-500 dark:text-slate-400">Service:</span> <span className="font-bold">{serviceLabel(app.services) || "—"}</span></span>
-          <span><span className="font-semibold text-slate-500 dark:text-slate-400">RTO:</span> <span className="font-bold">{rtoList.find((x) => x.id === app.rto_id)?.name || "—"}</span></span>
+          {!(OperationalDetailsCard && onChangeService) && (
+            <span><span className="font-semibold text-slate-500 dark:text-slate-400">Service:</span> <span className="font-bold">{serviceLabel(app.services) || "—"}</span></span>
+          )}
+          {!(OperationalDetailsCard && (app.services?.rto_required || pccNeeded(app))) && (
+            <span><span className="font-semibold text-slate-500 dark:text-slate-400">RTO:</span> <span className="font-bold">{rtoList.find((x) => x.id === app.rto_id)?.name || "—"}</span></span>
+          )}
           <span className="flex items-center gap-1.5">
             <StatusBadge status={app.status} />
             {getProcessingStage(app) && (
@@ -4716,7 +4739,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
           {/* Column 1: applicant details + staff assignment */}
           <div>
             <Card title="Applicant Details" className="mb-4 overflow-hidden">
-              <AadhaarFillButton compact hint="Press “Save Applicant Details” to keep these changes." onFill={(patch) => setApplicant((s) => ({ ...s, ...patch }))} />
+              <AadhaarFillButton compact hint="Press “Save” to keep these changes." onFill={(patch) => setApplicant((s) => ({ ...s, ...patch }))} />
               <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                 <Field label="Name"><Input value={applicant.applicant_name} onChange={setApplicantField("applicant_name")} /></Field>
                 <Field label="Father/Husband"><Input value={applicant.father_husband_name} onChange={setApplicantField("father_husband_name")} /></Field>
@@ -4751,10 +4774,6 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
                   </>
                 )}
               </div>
-              <PrimaryButton disabled={savingApplicant} onClick={saveApplicant}>
-                {savingApplicant ? "Saving…" : "Save Applicant Details"}
-              </PrimaryButton>
-              {applicantAgeError && <p className="text-rose-500 text-xs mt-2">{applicantAgeError}</p>}
             </Card>
 
             {OperationalDetailsCard}
@@ -4766,7 +4785,6 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
                   {staffList.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
                 </Select>
               </Field>
-              <GhostButton onClick={() => onAssign(staffId || null)}>Save Assignment</GhostButton>
             </Card>
           </div>
 
@@ -4804,11 +4822,8 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
                   </div>
                 );
               })}
-              <div className="flex items-center justify-between mt-2">
+              <div className="flex items-center mt-2">
                 <GhostButton onClick={addAnswer}>+ Add Field</GhostButton>
-                <PrimaryButton disabled={savingAnswers} onClick={saveAnswers}>
-                  {savingAnswers ? "Saving…" : "Save Details"}
-                </PrimaryButton>
               </div>
             </Card>
 
@@ -4970,6 +4985,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
             </Card>
           </div>
         </div>
+        {SaveBar}
       </Modal>
       {pccCheckApp && (
         <PCCStatusCheckModal
@@ -4996,11 +5012,13 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
       <div>
         <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-slate-500 dark:text-slate-500 mb-4 -mt-1">
           <span><span className="font-semibold text-slate-600 dark:text-slate-300">Dealer:</span> {dealerLabel(app.dealers) || "—"}</span>
-          <span><span className="font-semibold text-slate-600 dark:text-slate-300">Service:</span> {serviceLabel(app.services) || "—"}</span>
+          {!(OperationalDetailsCard && onChangeService) && (
+            <span><span className="font-semibold text-slate-600 dark:text-slate-300">Service:</span> {serviceLabel(app.services) || "—"}</span>
+          )}
         </div>
         {QuickActionBar}
         <Card title="Applicant Details" className="mb-4 overflow-hidden">
-          <AadhaarFillButton compact hint="Press “Save Applicant Details” to keep these changes." onFill={(patch) => setApplicant((s) => ({ ...s, ...patch }))} />
+          <AadhaarFillButton compact hint="Press “Save” to keep these changes." onFill={(patch) => setApplicant((s) => ({ ...s, ...patch }))} />
           <div className="grid grid-cols-2 gap-x-3 gap-y-1">
             <Field label="Name"><Input value={applicant.applicant_name} onChange={setApplicantField("applicant_name")} /></Field>
             <Field label="Father/Husband"><Input value={applicant.father_husband_name} onChange={setApplicantField("father_husband_name")} /></Field>
@@ -5035,10 +5053,6 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
               </>
             )}
           </div>
-          <PrimaryButton disabled={savingApplicant} onClick={saveApplicant}>
-            {savingApplicant ? "Saving…" : "Save Applicant Details"}
-          </PrimaryButton>
-          {applicantAgeError && <p className="text-rose-500 text-xs mt-2">{applicantAgeError}</p>}
         </Card>
 
         {OperationalDetailsCard}
@@ -5074,11 +5088,8 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
               </div>
             );
           })}
-          <div className="flex items-center justify-between mt-2">
+          <div className="flex items-center mt-2">
             <GhostButton onClick={addAnswer}>+ Add Field</GhostButton>
-            <PrimaryButton disabled={savingAnswers} onClick={saveAnswers}>
-              {savingAnswers ? "Saving…" : "Save Details"}
-            </PrimaryButton>
           </div>
         </Card>
 
@@ -5156,6 +5167,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
           </Card>
         )}
       </div>
+      {SaveBar}
     </Modal>
     {pccCheckApp && (
       <PCCStatusCheckModal
