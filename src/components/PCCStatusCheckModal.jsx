@@ -182,6 +182,7 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
+  const [downloading, setDownloading] = useState(false);
   const [savingCert, setSavingCert] = useState(false);
   const [certSaved, setCertSaved] = useState(Boolean(row.pcc_certificate_path));
   const fileInputRef = React.useRef(null);
@@ -271,6 +272,25 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
     if (autoSearch && applicationNumber.trim() && !needsGuardian) runCheck();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The certificate link's token appears to be short-lived, so instead of
+  // reusing whatever certificateUrl came back from the earlier search, we
+  // re-run the check right at click time and open the freshest possible link
+  // immediately — minimizing the gap between "token issued" and "token used".
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      const fresh = await runCheck();
+      const url = fresh?.status?.certificateUrl;
+      if (url) {
+        window.open(url, "_blank", "noopener,noreferrer");
+      } else {
+        setError("Couldn't get a fresh certificate link — try Search Application again.");
+      }
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   const application = result?.application || null;
   // Before the user clicks "Search Application", show whatever the last
@@ -386,6 +406,16 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
                 <div className="font-semibold text-slate-700 dark:text-slate-300">{application.applicantName}</div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                {status?.certificateUrl && (
+                  <button
+                    type="button"
+                    disabled={downloading}
+                    onClick={handleDownload}
+                    className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-semibold rounded-lg px-4 py-2 text-sm"
+                  >
+                    {downloading ? "Getting link…" : "⬇ Download Certificate"}
+                  </button>
+                )}
                 {!isRejected && <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleCertFileChosen} />}
                 {!isRejected && <button
                   type="button"
@@ -402,6 +432,13 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
                 </button>}
               </div>
             </div>
+            {status?.certificateUrl && (
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">
+                "Download Certificate" opens the PDF on the Delhi Police portal, which only works
+                while you are logged in to the portal in this browser (otherwise it shows HTTP 401).
+                Download the PDF there, then use "Save Certificate to DB" to keep it in our records.
+              </p>
+            )}
 
             {certData && (
               <div className="mt-4 rounded-lg border border-slate-200 dark:border-slate-800 p-3 text-sm">

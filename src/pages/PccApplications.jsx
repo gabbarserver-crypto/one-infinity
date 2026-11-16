@@ -54,6 +54,16 @@ function isNewlyIssued(r) {
 //    drafted; the Delhi Police portal doesn't know it yet.
 //  - Actual:  12 digits (e.g. 202605032881) — generated after the PCC fee
 //    (350) is paid; only this one can be tracked on the portal.
+// Row tint on the "All" tab: Drafted blue, Issued green, Rejected red,
+// Under Verification yellow.
+function rowTint(r) {
+  if (isDraftPcc(r.pcc_no)) return "bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100/70 dark:hover:bg-blue-500/20";
+  if (r.pcc_status === "Certificate Issued") return "bg-green-50 dark:bg-green-500/10 hover:bg-green-100/70 dark:hover:bg-green-500/20";
+  if (r.pcc_status === "Rejected") return "bg-red-50 dark:bg-red-500/10 hover:bg-red-100/70 dark:hover:bg-red-500/20";
+  if (r.pcc_status === "Under Verification") return "bg-yellow-50 dark:bg-yellow-500/10 hover:bg-yellow-100/70 dark:hover:bg-yellow-500/20";
+  return "hover:bg-slate-50/60 dark:hover:bg-slate-800/30";
+}
+
 function isDraftPcc(pccNo) {
   const digits = String(pccNo || "").replace(/^DLSB-PCC\//i, "").trim();
   return /^\d{13,}$/.test(digits);
@@ -764,23 +774,6 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
           {running && (
             <GhostButton onClick={() => { stopRef.current = true; }} className="!px-3 !py-1.5 !text-xs">Stop</GhostButton>
           )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/pdf,.pdf"
-            multiple
-            className="hidden"
-            onChange={(e) => uploadCertificates(e.target.files)}
-          />
-          <GhostButton
-            onClick={() => fileInputRef.current?.click()}
-            disabled={loading || !!uploadProgress}
-            title="Select many certificate PDFs at once — each is matched to its application by the 12-digit PCC number in the file name"
-            className="!px-3 !py-2 !text-sm inline-flex items-center gap-1.5"
-          >
-            {uploadProgress ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-            {uploadProgress ? `Uploading ${uploadProgress.done}/${uploadProgress.total}…` : "Upload certificates"}
-          </GhostButton>
           <GhostButton
             onClick={exportExcel}
             disabled={loading || sorted.length === 0}
@@ -942,7 +935,7 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
                   const stage = getProcessingStage(r);
                   const justUpdated = updatedIds.has(r.id);
                   return (
-                    <tr key={r.id} className={`border-t border-slate-100 dark:border-slate-800 ${justUpdated ? "bg-green-50 dark:bg-green-500/10 shadow-[inset_3px_0_0_0_#22c55e]" : "hover:bg-slate-50/60 dark:hover:bg-slate-800/30"}`}>
+                    <tr key={r.id} className={`border-t border-slate-100 dark:border-slate-800 ${justUpdated ? "bg-green-50 dark:bg-green-500/10 shadow-[inset_3px_0_0_0_#22c55e]" : pccFilter === "" ? rowTint(r) : "hover:bg-slate-50/60 dark:hover:bg-slate-800/30"}`}>
                       <td className="max-md:hidden px-3 py-2 whitespace-nowrap font-semibold text-blue-600 dark:text-blue-400">{r.draft_code}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{isoToDDMMYYYY(rowDateISO(r))}</td>
                       {showAmount && <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{r.amount ?? ""}</td>}
@@ -1007,7 +1000,7 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
                         </div>
                         {getPccDoneSteps(r).length > 0 && (
                           <ul className="mt-1 space-y-0.5">
-                            {getPccDoneSteps(r).map((s) => (
+                            {getPccDoneSteps(r).slice(-1).map((s) => (
                               <li key={s.label} className="text-[11px] leading-tight whitespace-nowrap">
                                 <span className="text-emerald-500 mr-1">✓</span>
                                 <span className="text-slate-700 dark:text-slate-200">{s.label}</span>
