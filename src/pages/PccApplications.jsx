@@ -518,13 +518,20 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
     () => pccRows.filter((r) => r.pcc_no && !isDraftPcc(r.pcc_no) && CHECKABLE_STATUSES.has(r.pcc_status || "")),
     [pccRows]
   );
+  // One-off "re-check everything" list: every real (12-digit) PCC number,
+  // whatever its current status.
+  const allCheckable = useMemo(
+    () => pccRows.filter((r) => r.pcc_no && !isDraftPcc(r.pcc_no)),
+    [pccRows]
+  );
   const running = checkProgress !== null;
 
-  const runBulkCheck = async () => {
-    if (running || checkable.length === 0) return;
-    const skipped = pccRows.filter((r) => r.pcc_no && !isDraftPcc(r.pcc_no)).length - checkable.length;
+  const runBulkCheck = async (all = false) => {
+    const list = all ? allCheckable : checkable;
+    if (running || list.length === 0) return;
+    const skipped = all ? 0 : allCheckable.length - list.length;
     const ok = window.confirm(
-      `Check PCC status for ${checkable.length} application${checkable.length === 1 ? "" : "s"} on the Delhi Police portal?` +
+      `${all ? "Re-check ALL statuses — " : ""}Check PCC status for ${list.length} application${list.length === 1 ? "" : "s"} on the Delhi Police portal?` +
       (skipped > 0 ? `\n\n(${skipped} already Certificate Issued / Rejected / Police Case will be skipped.)` : "") +
       "\n\nThis can take a few minutes — keep this page open."
     );
@@ -533,8 +540,8 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
     stopRef.current = false;
     setCheckSummary(null);
     setUpdatedIds(new Set());
-    setCheckProgress({ done: 0, total: checkable.length });
-    const queue = [...checkable];
+    setCheckProgress({ done: 0, total: list.length });
+    const queue = [...list];
     let done = 0;
     let changed = 0;
     let unchanged = 0;
@@ -578,20 +585,20 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
           failures.push({ draft: row.draft_code, name: row.applicant_name, pcc: row.pcc_no, message: e?.message || "Failed" });
         }
         done += 1;
-        setCheckProgress({ done, total: checkable.length });
+        setCheckProgress({ done, total: list.length });
       }
     };
 
     await Promise.all(Array.from({ length: CHECK_CONCURRENCY }, worker));
     setCheckProgress(null);
     setCheckSummary({
-      total: checkable.length,
+      total: list.length,
       checked: done,
       changed,
       unchanged,
       updatedList,
       failures,
-      stopped: stopRef.current && done < checkable.length,
+      stopped: stopRef.current && done < list.length,
     });
   };
 
@@ -602,6 +609,22 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
       .eq("id", row.id);
     if (err) throw err;
     setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, father_husband_name: name } : r)));
+  };
+
+  // Copies the PCC numbers of rows whose Father Name is still empty, one per
+  // line — the console script on the portal takes this list so it only
+  // fetches those applicants.
+  const copyMissingFatherPccNos = async () => {
+    const list = rows
+      .filter((r) => String(r.pcc_no || "").trim() && !String(r.father_husband_name || "").trim())
+      .map((r) => plainPccNo(r.pcc_no));
+    const text = [...new Set(list)].join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      alert(`${new Set(list).size} PCC numbers copy ho gaye (jinka Father Name khali hai).`);
+    } catch {
+      window.prompt("Copy karein (Ctrl+C):", text);
+    }
   };
 
   const importFatherNames = async () => {
@@ -811,6 +834,14 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
             <Pencil size={14} /> Fill father names
           </GhostButton>
           <GhostButton
+            onClick={copyMissingFatherPccNos}
+            disabled={loading}
+            title="Copy PCC numbers of rows with empty Father Name (paste into the portal script)"
+            className="max-md:hidden !px-3 !py-2 !text-sm inline-flex items-center gap-1.5"
+          >
+            Copy missing PCC nos
+          </GhostButton>
+          <GhostButton
             onClick={exportExcel}
             disabled={loading || sorted.length === 0}
             title="Export the currently filtered and sorted list as Excel"
@@ -819,9 +850,9 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
             <Download size={14} /> Export Excel
           </GhostButton>
           <button
-            onClick={runBulkCheck}
-            disabled={running || loading || checkable.length === 0}
-            title="Look up every application's PCC status on the Delhi Police portal and update it here"
+            onClick={(e) => runBulkCheck(e.shiftKey)}
+            disabled={running || loading || allCheckable.length === 0}
+            title="Look up every application's PCC status on the Delhi Police portal and update it here (Shift+click: re-check ALL, including Certificate Issued / Rejected)"
             className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 transition-colors"
           >
             <RefreshCw size={14} className={running ? "animate-spin" : ""} />
