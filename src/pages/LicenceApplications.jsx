@@ -84,7 +84,8 @@ function isClosedText(r) {
 //            -> Under Process (RTO fee unpaid) -> Pending (no number yet)
 //  DL:       Issued -> Hold -> Closed (reason typed + amount filled)
 //            -> Pending (amount not filled)
-//            -> Waiting for RTO Approval (RTO has Slot Booking = No: auto mode)
+//            -> Waiting for RTO Approval (service Slot = Not Required, or RTO has
+//               Slot Booking = No: auto mode)
 //            -> Upcoming Slot (slot date written and it is today or ahead)
 //            -> Waiting for RTO Approval (RTO fee unpaid - was "Under Process")
 //            -> Waiting for Slot Booking (no slot date written yet)
@@ -99,6 +100,9 @@ function bucketOf(r, isDl, today, noSlotRtoIds) {
     // RTO marked "Slot Booking: No" in Masters (auto mode - DL Renew / Dup /
     // Add class etc. only pay the normal fee, no slot) -> straight to RTO.
     if (r.rto_id && noSlotRtoIds && noSlotRtoIds.has(r.rto_id)) return "approval";
+    // Service set to Slot = "Not Required" in Masters (DL ADD / DL DUP / DL
+    // RENEW ... auto mode) -> no slot to wait for, straight to RTO.
+    if (r.services?.slot_booking_required === false) return "approval";
     const iso = slotISO(r.slot_time);
     if (iso && iso >= today) return "upcoming";
     if (!feePaid(r)) return "approval"; // same category as "Waiting for RTO Approval"
@@ -148,7 +152,7 @@ function SortTh({ column, label, sortKey, sortDir, onSort }) {
 }
 
 const SELECT_COLS =
-  "id, draft_code, date_of_birth, application_date, submitted_at, amount, rto_fee, status, applicant_name, application_no, ll_dl_no, slot_time, remarks, rto_id, service_id, pcc_no, pcc_status, pcc_stage, pcc_timeline, pcc_not_required, dealers(name,code,short_name), services(parent_service,short_name,pcc_required,ll_dl_no_required)";
+  "id, draft_code, date_of_birth, application_date, submitted_at, amount, rto_fee, status, applicant_name, application_no, ll_dl_no, slot_time, remarks, rto_id, service_id, pcc_no, pcc_status, pcc_stage, pcc_timeline, pcc_not_required, dealers(name,code,short_name), services(parent_service,short_name,pcc_required,ll_dl_no_required,slot_booking_required)";
 
 // Same stored-file link the Applications page uses: keep the public URL but
 // ask the browser to save it as "application.<ext>".
@@ -200,7 +204,7 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
       setRows([]);
       const [{ data: rt }, { data: svc, error: svcErr }] = await Promise.all([
         supabase.from("rtos").select("id, name, slot_booking").order("name"),
-        supabase.from("services").select("id, parent_service, short_name, pcc_required, ll_dl_no_required"),
+        supabase.from("services").select("id, parent_service, short_name, pcc_required, ll_dl_no_required, slot_booking_required"),
       ]);
       if (cancelled) return;
       if (svcErr) { setError("Couldn't load services: " + svcErr.message); setLoading(false); return; }
@@ -307,7 +311,7 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
     () => new Set(rtoList.filter((x) => x.slot_booking === false).map((x) => x.id)),
     [rtoList]
   );
-  const isNoSlotRow = (r) => !!r.rto_id && noSlotRtoIds.has(r.rto_id);
+  const isNoSlotRow = (r) => (!!r.rto_id && noSlotRtoIds.has(r.rto_id)) || r.services?.slot_booking_required === false;
   const bucketOfRow = (r) => bucketOf(r, isDl, today, noSlotRtoIds);
 
   // Waiting for RTO Approval rows: LL/DL No. can be typed right here.
@@ -361,7 +365,7 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
         const picked = dlServices.find((x) => x.id === popService);
         const ok = await saveRtoSlot(r.id, { service_id: popService });
         if (!ok) return;
-        setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, services: picked ? { ...x.services, parent_service: picked.parent_service, short_name: picked.short_name, pcc_required: picked.pcc_required, ll_dl_no_required: picked.ll_dl_no_required } : x.services } : x)));
+        setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, services: picked ? { ...x.services, parent_service: picked.parent_service, short_name: picked.short_name, pcc_required: picked.pcc_required, ll_dl_no_required: picked.ll_dl_no_required, slot_booking_required: picked.slot_booking_required } : x.services } : x)));
         if (!newNo) setToast("Service changed to " + serviceLabel(picked));
       }
       if (newNo) await saveLlDl(r, newNo);
@@ -662,7 +666,7 @@ export async function fetchUpcomingSlotCount() {
   const res = await fetchAllRows(() =>
     supabase
       .from("applications")
-      .select("id, amount, rto_fee, status, ll_dl_no, slot_time, rto_id")
+      .select("id, amount, rto_fee, status, ll_dl_no, slot_time, rto_id, services(slot_booking_required)")
       .in("service_id", ids)
       .not("slot_time", "is", null)
       .order("id", { ascending: false })
