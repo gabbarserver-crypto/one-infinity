@@ -237,15 +237,27 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
     return () => { cancelled = true; };
   }, [kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Application No -> Sarathi application status page (DOB copied for pasting).
+  // Application No -> Sarathi (DL: related-applications search, no OTP). The Application No and
+  // DOB ride along in the link's #hash (never sent to Sarathi's server) so the
+  // "sarathi fill" bookmark can fill both boxes - only the captcha is left.
+  // DOB is also copied to the clipboard as a fallback.
   const openSarathi = async (row) => {
     if (!row.application_no) { setToast("Enter Application No first"); return; }
+    const appNo = String(row.application_no).trim();
+    let hash = "";
     if (row.date_of_birth) {
       const dob = isoToDDMMYYYY(row.date_of_birth);
-      try { await navigator.clipboard.writeText(dob); setToast("DOB copied: " + dob); } catch { /* clipboard may be blocked */ }
+      hash = `#a=${encodeURIComponent(appNo)}&d=${encodeURIComponent(dob)}`;
+      // Sarathi's redirect drops the #hash, so the clipboard is the main carrier:
+      // the "sarathi fill" bookmark reads "SARATHI|<appNo>|<DOB>" from it.
+      try { await navigator.clipboard.writeText(`SARATHI|${appNo}|${dob}`); setToast("Copied — Sarathi page khulne par \"sarathi fill\" bookmark click karein"); } catch { /* clipboard may be blocked */ }
     }
+    // DL page: "q" opens Related Applications Search (captcha only, shows the
+    // issued DL No.) - no OTP from the customer. Learning keeps "as" (Application
+    // Status, which sends an OTP).
+    const param = isDl ? "q" : "as";
     window.open(
-      `https://sarathi.parivahan.gov.in/sarathiservice/applicationredirect.do?as=${encodeURIComponent(row.application_no)}`,
+      `https://sarathi.parivahan.gov.in/sarathiservice/applicationredirect.do?${param}=${encodeURIComponent(appNo)}${hash}`,
       "_blank", "noopener,noreferrer"
     );
   };
