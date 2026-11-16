@@ -9,7 +9,7 @@
 // (Staff View)" tab — same rule as the PCC page.
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { Card, GhostButton, Toast } from "../components/UI";
+import { Card, GhostButton, PrimaryButton, Toast, Modal, Field, Select } from "../components/UI";
 import { fetchAllRows } from "../lib/fetchAll";
 import { todayIST } from "../lib/dates";
 import * as XLSX from "xlsx";
@@ -180,6 +180,13 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
   const [filter, setFilter] = useState("");
   const [toast, setToast] = useState(null);
   const [learningDocs, setLearningDocs] = useState({}); // { [applicationId]: file_url }
+  const [dlServices, setDlServices] = useState([]);
+  // "Waiting for Slot Booking" popup (click the applicant name): change the
+  // service and/or fill the DL No.
+  const [popupRow, setPopupRow] = useState(null);
+  const [popService, setPopService] = useState("");
+  const [popLlDl, setPopLlDl] = useState("");
+  const [popSaving, setPopSaving] = useState(false);
   const today = todayIST();
 
   // Staff with only the restricted Staff View never see Amount.
@@ -193,11 +200,12 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
       setRows([]);
       const [{ data: rt }, { data: svc, error: svcErr }] = await Promise.all([
         supabase.from("rtos").select("id, name, slot_booking").order("name"),
-        supabase.from("services").select("id, parent_service, short_name"),
+        supabase.from("services").select("id, parent_service, short_name, pcc_required, ll_dl_no_required"),
       ]);
       if (cancelled) return;
       if (svcErr) { setError("Couldn't load services: " + svcErr.message); setLoading(false); return; }
       setRtoList(rt || []);
+      setDlServices((svc || []).filter((s) => matcher.test(serviceText(s))).sort((a, b) => serviceLabel(a).localeCompare(serviceLabel(b))));
 
       const ids = (svc || []).filter((s) => matcher.test(serviceText(s))).map((s) => s.id);
       if (ids.length === 0) { setLoading(false); return; }
@@ -339,6 +347,30 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, search, rtoList, filter, today]);
 
+  const canOpenPopup = (r) => isDl && canEdit && bucketOfRow(r) === "slotbooking";
+  const openPopup = (r) => { setPopupRow(r); setPopService(r.service_id || ""); setPopLlDl(""); };
+  const savePopup = async () => {
+    const r = popupRow;
+    if (!r) return;
+    const newNo = popLlDl.trim();
+    const serviceChanged = popService && popService !== r.service_id;
+    if (!serviceChanged && !newNo) { setPopupRow(null); return; }
+    setPopSaving(true);
+    try {
+      if (serviceChanged) {
+        const picked = dlServices.find((x) => x.id === popService);
+        const ok = await saveRtoSlot(r.id, { service_id: popService });
+        if (!ok) return;
+        setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, services: picked ? { ...x.services, parent_service: picked.parent_service, short_name: picked.short_name, pcc_required: picked.pcc_required, ll_dl_no_required: picked.ll_dl_no_required } : x.services } : x)));
+        if (!newNo) setToast("Service changed to " + serviceLabel(picked));
+      }
+      if (newNo) await saveLlDl(r, newNo);
+      setPopupRow(null);
+    } finally {
+      setPopSaving(false);
+    }
+  };
+
   const accessors = {
     draft: (r) => r.draft_code || "",
     date: (r) => rowDateISO(r),
@@ -474,7 +506,18 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
                       {showAmount && <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{r.amount ?? ""}</td>}
                       <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{dealerLabel(r.dealers)}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{serviceLabel(r.services)}</td>
-                      <td className="px-3 py-2 whitespace-nowrap font-semibold text-slate-800 dark:text-slate-100">{r.applicant_name}</td>
+                      <td className="px-3 py-2 whitespace-nowrap font-semibold text-slate-800 dark:text-slate-100">
+                        {canOpenPopup(r) ? (
+                          <button
+                            type="button"
+                            onClick={() => openPopup(r)}
+                            title="Change service / fill DL No."
+                            className="font-semibold text-left hover:underline hover:text-blue-600 dark:hover:text-blue-400"
+                          >
+                            {r.applicant_name}
+                          </button>
+                        ) : r.applicant_name}
+                      </td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         {r.application_no ? (
                           <button
@@ -577,6 +620,31 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
           </div>
         </div>
       </Card>
+      {popupRow && (
+        <Modal title={`${popupRow.draft_code} — ${popupRow.applicant_name}`} onClose={() => setPopupRow(null)}>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+            Application No: <span className="font-semibold">{popupRow.application_no || "—"}</span> · Dealer: <span className="font-semibold">{dealerLabel(popupRow.dealers)}</span>
+          </p>
+          <Field label="Service">
+            <Select value={popService} onChange={(e) => setPopService(e.target.value)}>
+              {dlServices.map((x) => <option key={x.id} value={x.id}>{serviceLabel(x)}</option>)}
+            </Select>
+          </Field>
+          <Field label="DL No.">
+            <input
+              type="text"
+              value={popLlDl}
+              onChange={(e) => setPopLlDl(e.target.value)}
+              placeholder="DL No. (dalte hi application Issued ho jayegi)"
+              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800"
+            />
+          </Field>
+          <div className="flex items-center justify-end gap-2 mt-2">
+            <GhostButton onClick={() => setPopupRow(null)}>Cancel</GhostButton>
+            <PrimaryButton onClick={savePopup} disabled={popSaving}>{popSaving ? "Saving…" : "Save"}</PrimaryButton>
+          </div>
+        </Modal>
+      )}
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>
   );
