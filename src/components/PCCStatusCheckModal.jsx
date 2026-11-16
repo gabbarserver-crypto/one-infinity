@@ -182,7 +182,6 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
-  const [downloading, setDownloading] = useState(false);
   const [savingCert, setSavingCert] = useState(false);
   const [certSaved, setCertSaved] = useState(Boolean(row.pcc_certificate_path));
   const fileInputRef = React.useRef(null);
@@ -272,56 +271,6 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
     if (autoSearch && applicationNumber.trim() && !needsGuardian) runCheck();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // The certificate link's token appears to be short-lived, so instead of
-  // reusing whatever certificateUrl came back from the earlier search, we
-  // re-run the check right at click time and open the freshest possible link
-  // immediately — minimizing the gap between "token issued" and "token used".
-  const handleDownload = async () => {
-    setDownloading(true);
-    try {
-      const fresh = await runCheck();
-      const url = fresh?.status?.certificateUrl;
-      if (url) {
-        // One click = download + save to our records. Needs the portal login
-        // in this browser; if the browser blocks reading the PDF (CORS /
-        // not logged in), fall back to opening it so it can still be
-        // downloaded and saved by hand.
-        let saved = false;
-        try {
-          const r = await fetch(url, { credentials: "include" });
-          const buf = await r.arrayBuffer();
-          if (!r.ok || new TextDecoder("latin1").decode(buf.slice(0, 4)) !== "%PDF") throw new Error("not a pdf");
-          const blob = new Blob([buf], { type: "application/pdf" });
-          const blobUrl = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = blobUrl;
-          a.download = `${String(applicationNumber).replace(/^DLSB-PCC\//i, "").trim() || "PCC"}.pdf`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
-          if (!row.pcc_certificate_path || !certSaved) {
-            setSavingCert(true);
-            await saveCertificateFile(row.id, new File([blob], "certificate.pdf", { type: "application/pdf" }));
-            setCertSaved(true);
-            onCertificateSaved?.(row.id);
-          }
-          saved = true;
-        } catch {
-          window.open(url, "_blank", "noopener,noreferrer");
-          setError("Auto-save nahi hua (portal login / browser block). PDF download karke 'Save Certificate to DB' dabayein.");
-        } finally {
-          setSavingCert(false);
-        }
-        if (saved) setError(null);
-      } else {
-        setError("Couldn't get a fresh certificate link — try Search Application again.");
-      }
-    } finally {
-      setDownloading(false);
-    }
-  };
 
   const application = result?.application || null;
   // Before the user clicks "Search Application", show whatever the last
@@ -437,16 +386,6 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
                 <div className="font-semibold text-slate-700 dark:text-slate-300">{application.applicantName}</div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                {status?.certificateUrl && (
-                  <button
-                    type="button"
-                    disabled={downloading}
-                    onClick={handleDownload}
-                    className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-semibold rounded-lg px-4 py-2 text-sm"
-                  >
-                    {downloading ? "Downloading & saving…" : "⬇ Download & Save Certificate"}
-                  </button>
-                )}
                 {!isRejected && <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleCertFileChosen} />}
                 {!isRejected && <button
                   type="button"
@@ -463,13 +402,6 @@ export default function PCCStatusCheckModal({ row, onClose, onCertificateSaved, 
                 </button>}
               </div>
             </div>
-            {status?.certificateUrl && (
-              <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">
-                "Download Certificate" opens the PDF on the Delhi Police portal, which only works
-                while you are logged in to the portal in this browser (otherwise it shows HTTP 401).
-                Download the PDF there, then use "Save Certificate to DB" to keep it in our records.
-              </p>
-            )}
 
             {certData && (
               <div className="mt-4 rounded-lg border border-slate-200 dark:border-slate-800 p-3 text-sm">
