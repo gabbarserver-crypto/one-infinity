@@ -123,11 +123,17 @@ export function Input({ preserveCase, onChange, type, as, ...props }) {
   const shouldUppercase = !preserveCase && !NO_UPPERCASE_TYPES.has(type);
 
   const handleChange = (e) => {
-    if (shouldUppercase) {
-      const pos = e.target.selectionStart;
-      e.target.value = e.target.value.toUpperCase();
-      // Restore cursor position — assigning .value moves it to the end otherwise.
-      if (pos !== null && e.target.setSelectionRange) e.target.setSelectionRange(pos, pos);
+    // Keyboard (Gboard/IME) ke composition ke beech value overwrite karne se
+    // typing atak jati hai, isliye composing ke dauran uppercase nahi karte.
+    if (shouldUppercase && !e.nativeEvent?.isComposing) {
+      const el = e.target;
+      const pos = el.selectionStart;
+      const upper = el.value.toUpperCase();
+      if (upper !== el.value) {
+        el.value = upper;
+        // Cursor position restore — warna cursor end me chala jata hai.
+        if (pos !== null && el.setSelectionRange) el.setSelectionRange(pos, pos);
+      }
     }
     onChange?.(e);
   };
@@ -149,6 +155,7 @@ export function Input({ preserveCase, onChange, type, as, ...props }) {
       {...props}
       type={type}
       onChange={handleChange}
+      onCompositionEnd={handleChange}
       className={`${baseClass} ${props.className || ""}`}
     />
   );
