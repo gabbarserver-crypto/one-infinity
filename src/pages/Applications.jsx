@@ -4471,130 +4471,169 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
   // are unchanged too — EditableCell/EditableSelect still read the same
   // CanEditContext, so this doesn't grant edit access to anyone who didn't
   // already have it in the table.
-  const OperationalDetailsCard = onSaveField ? (
-    <Card title="Operational Details" className="mb-4">
-      <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+  const OperationalDetailsCard = onSaveField ? (() => {
+    // One list of every application column. Editable ones come first, the
+    // read-only ones (Draft No, locked fields, Dealer for non-admin) go last.
+    const items = [];
+    const add = (key, label, editable, node, wide = false) => items.push({ key, label, editable, node, wide });
+    const completed = app.status === "Completed";
+    const dealerEditable = !!(isAdmin && onChangeDealer);
+
+    add("dealer", "Dealer", dealerEditable, dealerEditable ? (
+      <SearchableSelect
+        value={app.dealer_id || ""}
+        options={dealerList.map((d) => ({ id: d.id, name: dealerOptionLabel(d) }))}
+        onChange={(id) => id && id !== app.dealer_id && window.confirm("Change dealer for this application? Its ledger charge will move to the new dealer.") && onChangeDealer(id)}
+        placeholder="Type to search dealer…"
+      />
+    ) : (
+      <p className="text-sm font-medium text-slate-700 dark:text-slate-200 py-2">{dealerLabel(app.dealers) || "—"}</p>
+    ));
+
+    const serviceEditable = !!onChangeService && !completed && !(Number(app.amount) > 0);
+    add("service", "Service", serviceEditable, serviceEditable ? (
+      <EditableSelect
+        width="w-full"
+        value={app.service_id}
+        options={serviceList.map((s) => ({ id: s.id, name: serviceLabel(s) }))}
+        placeholder="Select Service"
+        onSave={onChangeService}
+      />
+    ) : (
+      <>
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-200 py-2">{serviceLabel(app.services)}</p>
         {onChangeService && (
-          <Field label="Service">
-            {app.status !== "Completed" && !(Number(app.amount) > 0) ? (
-              <EditableSelect
-                width="w-full"
-                value={app.service_id}
-                options={serviceList.map((s) => ({ id: s.id, name: serviceLabel(s) }))}
-                placeholder="Select Service"
-                onSave={onChangeService}
-              />
-            ) : (
-              <>
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-200 py-2">{serviceLabel(app.services)}</p>
-                <p className="text-[11px] text-slate-400 dark:text-slate-500">
-                  {app.status === "Completed" ? "Completed — service locked." : "Amount bhara hai — service change nahi ho sakti."}
-                </p>
-              </>
-            )}
-          </Field>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500">
+            {completed ? "Completed — service locked." : "Amount bhara hai — service change nahi ho sakti."}
+          </p>
         )}
-        <Field label="Application Date">
-          <EditableCell
+      </>
+    ));
+
+    add("application_date", "Application Date", true, (
+      <EditableCell
+        width="w-full"
+        value={app.application_date ? isoToDDMMYYYY(app.application_date) : ""}
+        placeholder="DD-MM-YYYY"
+        onSave={(v) => onSaveField(app.id, "application_date", ddmmyyyyToISO(v) || null)}
+      />
+    ));
+    if (!restricted) {
+      add("amount", "Amount", true, (
+        <EditableCell
+          type="number" width="w-full" noSpinner
+          value={app.amount}
+          onSave={(v) => onSaveAmount(app.id, v === "" ? null : parseFloat(v))}
+        />
+      ));
+    }
+    add("application_no", "Application No.", !completed && app.services?.application_no_required !== false, (
+      <EditableCell
+        width="w-full"
+        value={app.application_no}
+        disabled={app.services?.application_no_required === false}
+        readOnly={completed}
+        readOnlyTitle="Application No. is locked after completion"
+        onSave={(v) => onSaveField(app.id, "application_no", v || null)}
+      />
+    ));
+    add("ll_dl_no", "LL/DL No.", !completed && app.services?.ll_dl_no_required !== false, (
+      <EditableCell
+        width="w-full"
+        value={app.ll_dl_no}
+        disabled={app.services?.ll_dl_no_required === false}
+        readOnly={completed}
+        readOnlyTitle="LL/DL No. is locked after completion"
+        onSave={(v) => onSaveField(app.id, "ll_dl_no", v || null)}
+      />
+    ));
+    add("rto_fee", "RTO Fee", !isPccService(app.services), (
+      <EditableCell
+        type="number" width="w-full" noSpinner
+        value={app.rto_fee}
+        disabled={isPccService(app.services)}
+        onSave={(v) => onSaveField(app.id, "rto_fee", v === "" ? null : parseFloat(v))}
+      />
+    ));
+    if (pccNeeded(app)) {
+      add("pcc_fee", "PCC Fee", true, (
+        <EditableCell
+          type="number" width="w-full"
+          value={app.pcc_fee}
+          onSave={(v) => onSavePccFee(app, v)}
+        />
+      ));
+    }
+    if (!restricted && app.services?.agency_required) {
+      add("agency", "Agency", true, (
+        <EditableSelect
+          width="w-full"
+          value={app.agency_id}
+          options={agencyList}
+          placeholder="Select Agency"
+          onSave={(v) => onSaveAgencyId(app, v)}
+        />
+      ));
+      add("agency_fee", "Agency Fee", true, (
+        <EditableCell
+          type="number" width="w-full"
+          value={app.agency_fee}
+          onSave={(v) => onSaveAgencyFee(app, v)}
+        />
+      ));
+    }
+    if (app.services?.rto_required || pccNeeded(app)) {
+      add("rto", "RTO", true, (
+        <>
+          <EditableSelect
             width="w-full"
-            value={app.application_date ? isoToDDMMYYYY(app.application_date) : ""}
-            placeholder="DD-MM-YYYY"
-            onSave={(v) => onSaveField(app.id, "application_date", ddmmyyyyToISO(v) || null)}
+            value={app.rto_id}
+            options={rtoList}
+            placeholder="Select RTO"
+            onSave={(v) => onSaveField(app.id, "rto_id", v || null)}
           />
-        </Field>
-        {!restricted && (
-          <Field label="Amount">
-            <EditableCell
-              type="number" width="w-full" noSpinner
-              value={app.amount}
-              onSave={(v) => onSaveAmount(app.id, v === "" ? null : parseFloat(v))}
-            />
-          </Field>
-        )}
-        <Field label="Application No.">
-          <EditableCell
-            width="w-full"
-            value={app.application_no}
-            disabled={app.services?.application_no_required === false}
-            readOnly={app.status === "Completed"}
-            readOnlyTitle="Application No. is locked after completion"
-            onSave={(v) => onSaveField(app.id, "application_no", v || null)}
-          />
-        </Field>
-        <Field label="LL/DL No.">
-          <EditableCell
-            width="w-full"
-            value={app.ll_dl_no}
-            disabled={app.services?.ll_dl_no_required === false}
-            readOnly={app.status === "Completed"}
-            readOnlyTitle="LL/DL No. is locked after completion"
-            onSave={(v) => onSaveField(app.id, "ll_dl_no", v || null)}
-          />
-        </Field>
-        <Field label="RTO Fee">
-          <EditableCell
-            type="number" width="w-full" noSpinner
-            value={app.rto_fee}
-            disabled={isPccService(app.services)}
-            onSave={(v) => onSaveField(app.id, "rto_fee", v === "" ? null : parseFloat(v))}
-          />
-        </Field>
-        {pccNeeded(app) && (
-          <Field label="PCC Fee">
-            <EditableCell
-              type="number" width="w-full"
-              value={app.pcc_fee}
-              onSave={(v) => onSavePccFee(app, v)}
-            />
-          </Field>
-        )}
-        {!restricted && app.services?.agency_required && (
+          {pccNeeded(app) && rtoIsPccMarker(app, rtoList) && (
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Abhi table me "PCC" dikh raha hai — asli RTO chunne par wahi dikhega.</p>
+          )}
+        </>
+      ));
+    } else if (app.rto_id) {
+      add("rto", "RTO", false, (
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-200 py-2">{rtoList.find((x) => x.id === app.rto_id)?.name || "—"}</p>
+      ));
+    }
+    if (app.services?.slot_booking_required) {
+      add("slot", "Slot", true, (
+        <EditableCell
+          width="w-full"
+          value={app.slot_time}
+          placeholder="DD-MM-YYYY"
+          onSave={(v) => onSaveField(app.id, "slot_time", v || null)}
+        />
+      ));
+    }
+    add("draft_code", "Draft No", false, (
+      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 py-2">{app.draft_code || "—"}</p>
+    ));
+
+    const editableItems = items.filter((x) => x.editable);
+    const readOnlyItems = items.filter((x) => !x.editable);
+    return (
+      <Card title="Operational Details" className="mb-4">
+        <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+          {editableItems.map((x) => <Field key={x.key} label={x.label}>{x.node}</Field>)}
+        </div>
+        {readOnlyItems.length > 0 && (
           <>
-            <Field label="Agency">
-              <EditableSelect
-                width="w-full"
-                value={app.agency_id}
-                options={agencyList}
-                placeholder="Select Agency"
-                onSave={(v) => onSaveAgencyId(app, v)}
-              />
-            </Field>
-            <Field label="Agency Fee">
-              <EditableCell
-                type="number" width="w-full"
-                value={app.agency_fee}
-                onSave={(v) => onSaveAgencyFee(app, v)}
-              />
-            </Field>
+            <p className="mt-4 mb-2 pt-3 border-t border-slate-200 dark:border-slate-800 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Read-only</p>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+              {readOnlyItems.map((x) => <Field key={x.key} label={x.label}>{x.node}</Field>)}
+            </div>
           </>
         )}
-        {(app.services?.rto_required || pccNeeded(app)) && (
-          <Field label="RTO">
-            <EditableSelect
-              width="w-full"
-              value={app.rto_id}
-              options={rtoList}
-              placeholder="Select RTO"
-              onSave={(v) => onSaveField(app.id, "rto_id", v || null)}
-            />
-            {pccNeeded(app) && rtoIsPccMarker(app, rtoList) && (
-              <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Abhi table me "PCC" dikh raha hai — asli RTO chunne par wahi dikhega.</p>
-            )}
-          </Field>
-        )}
-        {app.services?.slot_booking_required && (
-          <Field label="Slot">
-            <EditableCell
-              width="w-full"
-              value={app.slot_time}
-              placeholder="DD-MM-YYYY"
-              onSave={(v) => onSaveField(app.id, "slot_time", v || null)}
-            />
-          </Field>
-        )}
-      </div>
-    </Card>
-  ) : null;
+      </Card>
+    );
+  })() : null;
 
   if (mode === "status") {
     return (
@@ -4702,8 +4741,10 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
     const profit = Number(app.amount || 0) - Number(app.rto_fee || 0) - Number(app.pcc_fee || 0) - Number(app.agency_fee || 0);
     return (
       <>
-      <Modal title={`Application — ${app.draft_code}`} onClose={onClose} size="xl">
+      <Modal title="Application" onClose={onClose} size="xl">
         <div className="rounded-xl border border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-slate-950/30 px-4 py-3 mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-800 dark:text-slate-100">
+          {!OperationalDetailsCard && (
+            <>
           <span className="flex items-center gap-1.5">
             <span className="font-semibold text-slate-500 dark:text-slate-400">Dealer:</span>
             {isAdmin && onChangeDealer ? (
@@ -4724,6 +4765,8 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
           )}
           {!(OperationalDetailsCard && (app.services?.rto_required || pccNeeded(app))) && (
             <span><span className="font-semibold text-slate-500 dark:text-slate-400">RTO:</span> <span className="font-bold">{rtoList.find((x) => x.id === app.rto_id)?.name || "—"}</span></span>
+          )}
+            </>
           )}
           <span className="flex items-center gap-1.5">
             <StatusBadge status={app.status} />
@@ -5008,14 +5051,14 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
   // mode === "customer": edit only customer-related details
   return (
     <>
-    <Modal title={`Application — ${app.draft_code}`} onClose={onClose} size="wide">
+    <Modal title="Application" onClose={onClose} size="wide">
       <div>
-        <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-slate-500 dark:text-slate-500 mb-4 -mt-1">
-          <span><span className="font-semibold text-slate-600 dark:text-slate-300">Dealer:</span> {dealerLabel(app.dealers) || "—"}</span>
-          {!(OperationalDetailsCard && onChangeService) && (
+        {!OperationalDetailsCard && (
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-slate-500 dark:text-slate-500 mb-4 -mt-1">
+            <span><span className="font-semibold text-slate-600 dark:text-slate-300">Dealer:</span> {dealerLabel(app.dealers) || "—"}</span>
             <span><span className="font-semibold text-slate-600 dark:text-slate-300">Service:</span> {serviceLabel(app.services) || "—"}</span>
-          )}
-        </div>
+          </div>
+        )}
         {QuickActionBar}
         <Card title="Applicant Details" className="mb-4 overflow-hidden">
           <AadhaarFillButton compact hint="Press “Save” to keep these changes." onFill={(patch) => setApplicant((s) => ({ ...s, ...patch }))} />

@@ -351,7 +351,11 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, search, rtoList, filter, today]);
 
-  const canOpenPopup = (r) => isDl && canEdit && bucketOfRow(r) === "slotbooking";
+  // DL page: the applicant name opens the Service / DL No. popup in EVERY
+  // bucket (Pending, Hold, Upcoming, Approval, ...) — but only while the
+  // LL/DL No. is still blank. Once any DL No. / reason text is there, the
+  // name is plain text and the row can't be edited from here.
+  const canOpenPopup = (r) => isDl && canEdit && !String(r.ll_dl_no || "").trim();
   const openPopup = (r) => { setPopupRow(r); setPopService(r.service_id || ""); setPopLlDl(""); };
   const savePopup = async () => {
     const r = popupRow;
@@ -516,7 +520,7 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
                             type="button"
                             onClick={() => openPopup(r)}
                             title="Change service / fill DL No."
-                            className="font-semibold text-left hover:underline hover:text-blue-600 dark:hover:text-blue-400"
+                            className="font-semibold text-left text-blue-600 dark:text-blue-400 hover:underline hover:text-blue-700 dark:hover:text-blue-300"
                           >
                             {r.applicant_name}
                           </button>
