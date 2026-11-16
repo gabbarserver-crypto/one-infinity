@@ -8,8 +8,10 @@
 // (same-origin "/api/pcc-status/check") instead of a separately-hosted
 // server — no VITE_PCC_STATUS_API_BASE env var needed.
 import { lookupPccStatus } from "../_lib/pccClient.js";
+import { applyCors } from "../_lib/cors.js";
 
 export default async function handler(req, res) {
+  if (applyCors(req, res)) return; // Android app preflight
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const { applicationNumber, applicantName, guardianName } = req.body || {};

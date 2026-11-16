@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from "react";
 import { Modal, Field, Input, PrimaryButton } from "./UI";
 import { supabase } from "../lib/supabase";
+import { SERVER_API_BASE } from "../lib/serverApi";
 
 // Same-origin by default — this hits the Vercel serverless function at
 // api/pcc-status/check.js, deployed alongside the frontend, so it works
@@ -13,7 +14,7 @@ import { supabase } from "../lib/supabase";
 // VITE_PCC_STATUS_API_BASE if you're intentionally pointing at a different,
 // separately-hosted proxy (e.g. the old server/index.js during local dev
 // against "http://localhost:5000").
-const PCC_STATUS_API_BASE = import.meta.env.VITE_PCC_STATUS_API_BASE || "";
+const PCC_STATUS_API_BASE = import.meta.env.VITE_PCC_STATUS_API_BASE || SERVER_API_BASE;
 
 /**
  * Confirmed from the real get-pcc-application-status response: the API's
