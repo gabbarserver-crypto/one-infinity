@@ -7,7 +7,7 @@
 // clicking a PCC No checks that one application, and the list exports to Excel.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { Card, StatusBadge, GhostButton } from "../components/UI";
+import { Card, StatusBadge, GhostButton, Modal } from "../components/UI";
 import { fetchAllRows } from "../lib/fetchAll";
 import { todayIST } from "../lib/dates";
 import { SERVER_API_BASE } from "../lib/serverApi";
@@ -342,6 +342,12 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
   // Bulk certificate upload: { done, total } while running, then a summary.
   const fileInputRef = useRef(null);
   const [uploadProgress, setUploadProgress] = useState(null);
+  // "Fill father names" — paste "<PCC no>,<father name>" lines (made from the
+  // portal's own data) and fill only the rows whose Father Name is empty.
+  const [showFatherImport, setShowFatherImport] = useState(false);
+  const [fatherImportText, setFatherImportText] = useState("");
+  const [fatherImporting, setFatherImporting] = useState(false);
+  const [fatherImportResult, setFatherImportResult] = useState(null);
   const [uploadSummary, setUploadSummary] = useState(null);
   // Clicking a PCC No opens the same "Track Application" modal as the Applications page.
   const [pccCheckRow, setPccCheckRow] = useState(null);
@@ -598,6 +604,32 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
     setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, father_husband_name: name } : r)));
   };
 
+  const importFatherNames = async () => {
+    setFatherImporting(true);
+    setFatherImportResult(null);
+    const byPcc = new Map(rows.map((r) => [plainPccNo(r.pcc_no), r]));
+    let updated = 0, hadAlready = 0, noMatch = 0, failed = 0;
+    for (const line of fatherImportText.split(/\r?\n/)) {
+      const parts = line.split(/[,\t]/);
+      if (parts.length < 2) continue;
+      const pcc = plainPccNo(parts[0].replace(/["']/g, ""));
+      if (!/^\d{10,}$/.test(pcc)) continue; // header / junk line
+      const father = stripKinPrefix(parts.slice(1).join(" ").replace(/["']/g, "")).trim().toUpperCase();
+      if (!father) continue;
+      const row = byPcc.get(pcc);
+      if (!row) { noMatch += 1; continue; }
+      if (String(row.father_husband_name || "").trim()) { hadAlready += 1; continue; }
+      try {
+        await saveFatherName(row, father);
+        updated += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    setFatherImportResult({ updated, hadAlready, noMatch, failed });
+    setFatherImporting(false);
+  };
+
   const savePccNo = async (row, no) => {
     const updates = { pcc_no: no };
     // A new/changed number starts fresh: old status/timeline belonged to the old number.
@@ -769,6 +801,14 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
           >
             {uploadProgress ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
             {uploadProgress ? `Uploading ${uploadProgress.done}/${uploadProgress.total}…` : "Upload certificates"}
+          </GhostButton>
+          <GhostButton
+            onClick={() => { setFatherImportResult(null); setShowFatherImport(true); }}
+            disabled={loading}
+            title="Paste PCC No + father name lines to fill the empty Father Name cells"
+            className="max-md:hidden !px-3 !py-2 !text-sm inline-flex items-center gap-1.5"
+          >
+            <Pencil size={14} /> Fill father names
           </GhostButton>
           <GhostButton
             onClick={exportExcel}
@@ -1031,6 +1071,41 @@ export default function PccApplications({ isAdmin = false, visibleNav = [] } = {
           </div>
         </div>
       </Card>
+
+      {showFatherImport && (
+        <Modal title="Fill father names" onClose={() => setShowFatherImport(false)}>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+            Har line me: <span className="font-mono">PCC number, father name</span> (comma ya tab se alag). Sirf wahi rows bharengi
+            jinka Father Name khali hai — jo pehle se bhara hai wo nahi badlega.
+          </p>
+          <textarea
+            value={fatherImportText}
+            onChange={(e) => setFatherImportText(e.target.value)}
+            rows={10}
+            placeholder={"202603014865,ASHOK\n202603013843,RAMESH"}
+            className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 px-3 py-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-400"
+          />
+          {fatherImportResult && (
+            <p className="text-xs mt-2 text-slate-600 dark:text-slate-300">
+              <span className="font-semibold text-emerald-600">{fatherImportResult.updated} bhare gaye</span>
+              {" · "}{fatherImportResult.hadAlready} me pehle se father name tha
+              {" · "}{fatherImportResult.noMatch} PCC no list me nahi mile
+              {fatherImportResult.failed > 0 && <span className="text-rose-500"> · {fatherImportResult.failed} fail</span>}
+            </p>
+          )}
+          <div className="flex justify-end gap-2 mt-3">
+            <GhostButton onClick={() => setShowFatherImport(false)} className="!px-3 !py-1.5 !text-xs">Close</GhostButton>
+            <button
+              onClick={importFatherNames}
+              disabled={fatherImporting || !fatherImportText.trim()}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold px-4 py-1.5"
+            >
+              {fatherImporting && <Loader2 size={12} className="animate-spin" />}
+              {fatherImporting ? "Filling…" : "Fill father names"}
+            </button>
+          </div>
+        </Modal>
+      )}
 
       {pccCheckRow && (
         <PCCStatusCheckModal
