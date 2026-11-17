@@ -187,7 +187,8 @@ export default function App() {
   // column-limited substitute for the full Applications tab).
   const visibleNav = React.useMemo(() => {
     if (!staff) return NAV;
-    if (isAdmin) return NAV.filter((n) => n.key !== "staffApplications" && n.key !== "staffDraftApplications");
+    // Payment Entry is the staff-side entry form; Admin verifies from the Ledger page instead.
+    if (isAdmin) return NAV.filter((n) => n.key !== "staffApplications" && n.key !== "staffDraftApplications" && n.key !== "paymentEntries");
     return NAV.filter((n) => {
       if (n.key === "applicationExcel") return false;
       if (n.key === "pccApplications" || n.key === "learningApplications" || n.key === "dlApplications") return !!(permMap.applications?.can_view || permMap.staffApplications?.can_view);
@@ -678,7 +679,7 @@ export default function App() {
         active={active}
         onNavigate={(key) => { setActive(key); refreshPendingChatCount(); refreshPendingDraftCount(); refreshUpcomingSlotCount(); }}
         staff={staff}
-        badges={{ chats: pendingChatCount, draftApplications: pendingDraftCount, staffDraftApplications: pendingDraftCount, dlApplications: upcomingSlotCount, paymentEntries: pendingPaymentCount }}
+        badges={{ chats: pendingChatCount, draftApplications: pendingDraftCount, staffDraftApplications: pendingDraftCount, dlApplications: upcomingSlotCount, ledger: pendingPaymentCount }}
         onLogout={() => supabase.auth.signOut()}
       />
       <main
@@ -705,7 +706,7 @@ export default function App() {
           setActive(key);
           refreshPendingChatCount();
         }}
-        badges={{ chats: pendingChatCount, draftApplications: pendingDraftCount, staffDraftApplications: pendingDraftCount, dlApplications: upcomingSlotCount, paymentEntries: pendingPaymentCount }}
+        badges={{ chats: pendingChatCount, draftApplications: pendingDraftCount, staffDraftApplications: pendingDraftCount, dlApplications: upcomingSlotCount, ledger: pendingPaymentCount }}
       />
       <CommsWindow
         ref={commsWindowRef}

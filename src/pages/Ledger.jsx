@@ -5,6 +5,7 @@ import { Card, Field, GhostButton, PrimaryButton, Modal } from "../components/UI
 import { DealerForm, AgencyForm } from "./Masters";
 import PaymentRegisters from "../components/PaymentRegisters";
 import Payments from "./Payments";
+import PaymentEntries from "./PaymentEntries";
 import { todayIST, fmtDate, istDayStart, istNextDayStart } from "../lib/dates";
 import { fetchAllRows } from "../lib/fetchAll";
 
@@ -59,6 +60,35 @@ function exportLedgerCSV(entityName, rows, serialMode = false) {
 // double-entry pairs, no more type/name buried in free text) via the
 // dealer_ledger / agency_ledger views, which already compute debit,
 // credit, and running_balance server-side.
+// "Verify Entries" tab button (Admin only) with a live count of staff payment
+// entries still waiting for verification.
+function VerifyEntriesTab({ active, onClick }) {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    const refresh = async () => {
+      const { count: c } = await supabase
+        .from("staff_payment_entries")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "Pending");
+      setCount(c || 0);
+    };
+    refresh();
+    window.addEventListener("payment-entries-changed", refresh);
+    return () => window.removeEventListener("payment-entries-changed", refresh);
+  }, []);
+  return (
+    <button
+      onClick={onClick}
+      className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 ${
+        active ? "bg-blue-600 text-white" : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+      }`}
+    >
+      Verify Entries
+      {count > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">{count}</span>}
+    </button>
+  );
+}
+
 export default function Ledger({ only, initialEntityId, isAdmin = false, staff } = {}) {
   const [entityId, setEntityId] = useState(initialEntityId || "");
   const [entityMode, setEntityMode] = useState(only === "agency" ? "agency" : "dealer"); // "dealer" | "agency"
@@ -479,6 +509,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false, staff }
           >
             All Receipts &amp; Payments
           </button>
+          {isAdmin && <VerifyEntriesTab active={entityMode === "verifyEntries"} onClick={() => setEntityMode("verifyEntries")} />}
           <button
             onClick={() => setEntityMode("recordPayment")}
             className={`px-4 py-2 rounded-lg text-sm font-semibold ${
@@ -495,6 +526,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false, staff }
       {!only && entityMode === "bankTxns" && <PaymentRegisters view="bank" isAdmin={isAdmin} />}
       {!only && entityMode === "allPayments" && <PaymentRegisters view="all" isAdmin={isAdmin} />}
       {!only && entityMode === "recordPayment" && <Payments staff={staff} />}
+      {!only && isAdmin && entityMode === "verifyEntries" && <PaymentEntries staff={staff} isAdmin verifyOnly />}
 
       {(only === "dealer" || (!only && entityMode === "dealer")) && (
         <SundryHead

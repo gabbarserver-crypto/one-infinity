@@ -384,7 +384,7 @@ export default function Payments({ staff } = {}) {
         <div className="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="Payment Type" required>
             <Select value={form.payment_type} onChange={set("payment_type")}>
-              <option value="dealer">Pay to Dealer</option>
+              <option value="dealer">Received from Dealer</option>
               <option value="agency">Pay to Agency</option>
               <option value="dealer_agency">Pay Dealer to Agency</option>
               {isAdmin && <option value="dealer_dealer">Pay Dealer to Dealer</option>}

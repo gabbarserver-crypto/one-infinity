@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { Card, Field, Input, Select, PrimaryButton, GhostButton, DangerButton, Modal, Toast } from "../components/UI";
 import SearchableSelect, { dealerOptionLabel } from "../components/SearchableSelect";
+import StaffQrSendPanel from "../components/StaffQrSendPanel";
 
 const todayIST = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 const EMPTY_FORM = () => ({ dealer_id: "", amount: "", payment_mode: "Cash", paid_on: todayIST(), reference_no: "", remarks: "" });
@@ -23,7 +24,8 @@ const STATUS_STYLE = {
 
 const notifyChanged = () => window.dispatchEvent(new Event("payment-entries-changed"));
 
-export default function PaymentEntries({ staff, isAdmin: isAdminProp } = {}) {
+// verifyOnly: Admin-only embed inside the Ledger page — shows just the staff entries to verify/reject (no entry form).
+export default function PaymentEntries({ staff, isAdmin: isAdminProp, verifyOnly = false } = {}) {
   const isAdmin = isAdminProp ?? staff?.roles?.role_name === "Admin";
   const [dealers, setDealers] = useState([]);
   const [entries, setEntries] = useState([]);
@@ -35,6 +37,7 @@ export default function PaymentEntries({ staff, isAdmin: isAdminProp } = {}) {
   const [busyId, setBusyId] = useState(null);
   const [rejecting, setRejecting] = useState(null); // entry being rejected
   const [rejectReason, setRejectReason] = useState("");
+  const [showSendQr, setShowSendQr] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -133,6 +136,14 @@ export default function PaymentEntries({ staff, isAdmin: isAdminProp } = {}) {
 
   return (
     <div className="space-y-4">
+      {!verifyOnly && (
+        <div className="flex flex-wrap items-center gap-3">
+          <PrimaryButton onClick={() => setShowSendQr(true)}>📲 Send Payment QR</PrimaryButton>
+          <span className="text-xs text-slate-500 dark:text-slate-400">QR payments are confirmed automatically by the gateway — no verification needed.</span>
+        </div>
+      )}
+
+      {!verifyOnly && (
       <Card title="Payment Entry">
         <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
           {isAdmin
@@ -170,8 +181,9 @@ export default function PaymentEntries({ staff, isAdmin: isAdminProp } = {}) {
         </div>
         <PrimaryButton onClick={submit} disabled={saving}>{saving ? "Saving..." : "Save Entry"}</PrimaryButton>
       </Card>
+      )}
 
-      <Card title={isAdmin ? "Entries" : "My Entries"}>
+      <Card title={verifyOnly ? "Staff Payment Entries — Verify" : isAdmin ? "Entries" : "My Entries"}>
         <div className="flex flex-wrap items-center gap-2 mb-3">
           {["Pending", "Verified", "Rejected", "All"].map((s) => (
             <button
@@ -271,6 +283,8 @@ export default function PaymentEntries({ staff, isAdmin: isAdminProp } = {}) {
           </div>
         </Modal>
       )}
+
+      {showSendQr && <StaffQrSendPanel staff={staff} dealers={dealers} onClose={() => setShowSendQr(false)} />}
 
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>
