@@ -4704,9 +4704,20 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
   if (mode === "admin") {
     const fee = (v) => `₹${Number(v || 0).toLocaleString("en-IN")}`;
     const profit = Number(app.amount || 0) - Number(app.rto_fee || 0) - Number(app.pcc_fee || 0) - Number(app.agency_fee || 0);
+    // Popup header shows the status line instead of the generic "Application" title.
+    const statusTitle = (
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-normal">
+        <StatusBadge status={app.status} />
+        {getProcessingStage(app) && (
+          <span className="text-xs font-medium text-blue-600 dark:text-blue-400">{getProcessingStage(app)}</span>
+        )}
+        {app.application_date && <span className="text-xs text-slate-400 dark:text-slate-500">Approved on {isoToDDMMYYYY(app.application_date)}</span>}
+      </span>
+    );
     return (
       <>
-      <Modal title="Application" onClose={onClose} size="xl">
+      <Modal title={statusTitle} onClose={onClose} size="xl">
+        {!OperationalDetailsCard && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-slate-950/30 px-3 py-2 mb-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-slate-800 dark:text-slate-100">
           {!OperationalDetailsCard && (
             <>
@@ -4733,14 +4744,8 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
           )}
             </>
           )}
-          <span className="flex items-center gap-1.5">
-            <StatusBadge status={app.status} />
-            {getProcessingStage(app) && (
-              <span className="text-xs font-medium text-blue-600 dark:text-blue-400">{getProcessingStage(app)}</span>
-            )}
-            {app.application_date && <span className="text-xs text-slate-400 dark:text-slate-500">Approved on {isoToDDMMYYYY(app.application_date)}</span>}
-          </span>
         </div>
+        )}
         {QuickActionBar}
 
         <div className="grid lg:grid-cols-[minmax(270px,0.9fr)_minmax(440px,1.5fr)_minmax(240px,0.75fr)] gap-3 items-start">
@@ -4791,7 +4796,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
           {/* Column 2: service answers, documents, chat */}
           <div>
 
-            <Card title="Documents" className="!p-4 mb-3 overflow-hidden">
+            <Card title="Documents" className="!p-4 !pt-6 mb-3 overflow-hidden">
               <div className="flex items-center justify-end mb-2">
                 <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">{(app.docs || []).filter((d) => !d.post_approval || app.status === "Accepted").length} files</span>
               </div>
