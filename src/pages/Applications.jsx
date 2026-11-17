@@ -4790,41 +4790,6 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
 
           {/* Column 2: service answers, documents, chat */}
           <div>
-            <Card title="Service Answers" className="!p-4 mb-3 overflow-hidden">
-              {answers.map((row, i) => {
-                // Same loose key match as getLearnerNo — lets staff click the
-                // Learner No value here to jump straight to Sarathi, same as
-                // the "↗ Download Learning" link under Documents below,
-                // instead of only being reachable from there.
-                const isLearnerNo = row.key.replace(/[^a-z]/gi, "").toLowerCase().includes("learnerno");
-                return (
-                  <div key={i} className="flex items-center gap-2 mb-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 p-1.5">
-                    <Input placeholder="Field name" value={row.key} onChange={setAnswerKey(i)} className="w-2/5" />
-                    <Input placeholder="Value" value={row.value} onChange={setAnswerValue(i)} />
-                    {isLearnerNo && row.value && app.application_no && (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try { await navigator.clipboard.writeText(row.value); } catch { /* clipboard may be blocked; link still opens */ }
-                          window.open(
-                            `https://sarathi.parivahan.gov.in/sarathiservice/applicationredirect.do?q=${encodeURIComponent(app.application_no)}`,
-                            "_blank", "noopener,noreferrer"
-                          );
-                        }}
-                        className="text-blue-600 dark:text-blue-400 hover:text-blue-700 shrink-0 px-1"
-                        title="Open Learning download on Sarathi"
-                      >
-                        <LinkIcon size={14} />
-                      </button>
-                    )}
-                    <button onClick={() => removeAnswer(i)} className="text-rose-500 text-xs font-semibold px-2 shrink-0">Remove</button>
-                  </div>
-                );
-              })}
-              <div className="flex items-center mt-2">
-                <GhostButton onClick={addAnswer}>+ Add Field</GhostButton>
-              </div>
-            </Card>
 
             <Card title="Documents" className="!p-4 mb-3 overflow-hidden">
               <div className="flex items-center justify-end mb-2">
@@ -4885,6 +4850,42 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
                     <DocumentRow compact doc={d} applicationId={app.id} onChanged={onDocsChanged} rejectedNote={/pcc/i.test(d.name) ? pccRejectionReason(app) : null} />
                   </div>
                 ))}
+              </div>
+            </Card>
+
+            <Card title="Service Answers" className="!p-4 mb-3 overflow-hidden">
+              {answers.map((row, i) => {
+                // Same loose key match as getLearnerNo — lets staff click the
+                // Learner No value here to jump straight to Sarathi, same as
+                // the "↗ Download Learning" link under Documents below,
+                // instead of only being reachable from there.
+                const isLearnerNo = row.key.replace(/[^a-z]/gi, "").toLowerCase().includes("learnerno");
+                return (
+                  <div key={i} className="flex items-center gap-2 mb-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 p-1.5">
+                    <Input placeholder="Field name" value={row.key} onChange={setAnswerKey(i)} className="w-2/5" />
+                    <Input placeholder="Value" value={row.value} onChange={setAnswerValue(i)} />
+                    {isLearnerNo && row.value && app.application_no && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try { await navigator.clipboard.writeText(row.value); } catch { /* clipboard may be blocked; link still opens */ }
+                          window.open(
+                            `https://sarathi.parivahan.gov.in/sarathiservice/applicationredirect.do?q=${encodeURIComponent(app.application_no)}`,
+                            "_blank", "noopener,noreferrer"
+                          );
+                        }}
+                        className="text-blue-600 dark:text-blue-400 hover:text-blue-700 shrink-0 px-1"
+                        title="Open Learning download on Sarathi"
+                      >
+                        <LinkIcon size={14} />
+                      </button>
+                    )}
+                    <button onClick={() => removeAnswer(i)} className="text-rose-500 text-xs font-semibold px-2 shrink-0">Remove</button>
+                  </div>
+                );
+              })}
+              <div className="flex items-center mt-2">
+                <GhostButton onClick={addAnswer}>+ Add Field</GhostButton>
               </div>
             </Card>
 
@@ -5193,12 +5194,46 @@ const DOC_STATUS_STYLES = {
   Rejected: "bg-rose-50 text-rose-700",
 };
 
+// Full-size document preview shown in a popup (instead of a new browser tab).
+function DocPreviewModal({ doc, isImage, isPdf, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.stopImmediatePropagation(); onClose(); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
+      <div className="w-full max-w-4xl max-h-[92vh] flex flex-col rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
+          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate" title={doc.name}>{doc.name}</div>
+          <div className="flex items-center gap-3 shrink-0">
+            <a href={doc.file_url} target="_blank" rel="noreferrer" className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline">Open in new tab ↗</a>
+            <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-800 dark:hover:text-white text-lg leading-none px-1" aria-label="Close preview">✕</button>
+          </div>
+        </div>
+        <div className="flex-1 min-h-0 overflow-auto bg-slate-100 dark:bg-slate-950 flex items-center justify-center">
+          {isImage ? (
+            <img src={doc.file_url} alt={doc.name} className="max-w-full max-h-[80vh] object-contain" />
+          ) : isPdf ? (
+            <iframe src={doc.file_url} title={doc.name} className="w-full h-[80vh] border-0" />
+          ) : (
+            <div className="p-8 text-sm text-slate-500 dark:text-slate-400">Preview not available for this file type — use “Open in new tab”.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null, compact = false }) {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [cropFile, setCropFile] = useState(null); // signature image waiting in the crop / remove-background modal
   const [editFile, setEditFile] = useState(null); // already-uploaded image loaded into the Rotate / Crop editor
+  const [previewOpen, setPreviewOpen] = useState(false); // full-size View popup
   const [loadingEdit, setLoadingEdit] = useState(false);
 
   // Storage path is `${applicationId}/${doc.id}-${file.name}` (see
@@ -5340,19 +5375,19 @@ function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null, compa
 
   const thumb = (
     doc.file_url && isImage ? (
-      <a href={doc.file_url} target="_blank" rel="noreferrer" className="block w-full h-full" title="Open full-size document">
+      <button type="button" onClick={() => setPreviewOpen(true)} className="block w-full h-full" title="Open full-size document">
         <img src={doc.file_url} alt={doc.name} className="w-full h-full object-cover hover:scale-[1.03] transition-transform" />
-      </a>
+      </button>
     ) : doc.file_url && isPdf ? (
-      <a href={doc.file_url} target="_blank" rel="noreferrer" className="flex flex-col items-center justify-center w-full h-full text-rose-600 dark:text-rose-400 hover:bg-slate-200/60 dark:hover:bg-slate-700/60">
+      <button type="button" onClick={() => setPreviewOpen(true)} className="flex flex-col items-center justify-center w-full h-full text-rose-600 dark:text-rose-400 hover:bg-slate-200/60 dark:hover:bg-slate-700/60">
         <span className="text-lg font-bold">PDF</span>
         <span className="text-[9px] font-semibold mt-0.5">OPEN</span>
-      </a>
+      </button>
     ) : doc.file_url ? (
-      <a href={doc.file_url} target="_blank" rel="noreferrer" className="flex flex-col items-center justify-center w-full h-full text-slate-500 dark:text-slate-400">
+      <button type="button" onClick={() => setPreviewOpen(true)} className="flex flex-col items-center justify-center w-full h-full text-slate-500 dark:text-slate-400">
         <span className="text-lg font-bold">FILE</span>
         <span className="text-[9px] mt-0.5">OPEN</span>
-      </a>
+      </button>
     ) : (
       <div className="text-center text-rose-500">
         <div className="text-lg">—</div>
@@ -5366,8 +5401,8 @@ function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null, compa
   if (compact) {
     return (
       <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/40 overflow-hidden shadow-sm h-full flex flex-col">
-        <div className="h-24 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 flex items-center justify-center overflow-hidden">{thumb}</div>
-        <div className="p-2 flex-1 flex flex-col gap-1">
+        <div className="h-16 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 flex items-center justify-center overflow-hidden">{thumb}</div>
+        <div className="p-1.5 flex-1 flex flex-col gap-0.5">
           <div className="flex items-start justify-between gap-1.5">
             <div className="min-w-0">
               <div className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate" title={doc.name}>{doc.name}</div>
@@ -5381,7 +5416,7 @@ function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null, compa
           </div>
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
             {doc.file_url && (
-              <a href={doc.file_url} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline">View ↗</a>
+              <button type="button" onClick={() => setPreviewOpen(true)} className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline">View ↗</button>
             )}
             {doc.file_url && isImage && (
               <button disabled={busy || uploading || loadingEdit} onClick={openEditor} className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 disabled:opacity-50">
@@ -5404,6 +5439,7 @@ function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null, compa
             </div>
           )}
         </div>
+        {previewOpen && doc.file_url && <DocPreviewModal doc={doc} isImage={isImage} isPdf={isPdf} onClose={() => setPreviewOpen(false)} />}
         {cropFile && (
           <ImageCropModal file={cropFile} allowBackgroundRemoval onClose={() => setCropFile(null)} onDone={(f) => { setCropFile(null); uploadFileNow(f); }} />
         )}
@@ -5419,19 +5455,19 @@ function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null, compa
       <div className="flex gap-3 p-3">
         <div className="w-24 h-20 sm:w-28 sm:h-24 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/80 shrink-0 flex items-center justify-center">
           {doc.file_url && isImage ? (
-            <a href={doc.file_url} target="_blank" rel="noreferrer" className="block w-full h-full" title="Open full-size document">
+            <button type="button" onClick={() => setPreviewOpen(true)} className="block w-full h-full" title="Open full-size document">
               <img src={doc.file_url} alt={doc.name} className="w-full h-full object-cover hover:scale-[1.03] transition-transform" />
-            </a>
+            </button>
           ) : doc.file_url && isPdf ? (
-            <a href={doc.file_url} target="_blank" rel="noreferrer" className="flex flex-col items-center justify-center w-full h-full text-rose-600 dark:text-rose-400 hover:bg-slate-200/60 dark:hover:bg-slate-700/60">
+            <button type="button" onClick={() => setPreviewOpen(true)} className="flex flex-col items-center justify-center w-full h-full text-rose-600 dark:text-rose-400 hover:bg-slate-200/60 dark:hover:bg-slate-700/60">
               <span className="text-lg font-bold">PDF</span>
               <span className="text-[9px] font-semibold mt-0.5">OPEN</span>
-            </a>
+            </button>
           ) : doc.file_url ? (
-            <a href={doc.file_url} target="_blank" rel="noreferrer" className="flex flex-col items-center justify-center w-full h-full text-slate-500 dark:text-slate-400">
+            <button type="button" onClick={() => setPreviewOpen(true)} className="flex flex-col items-center justify-center w-full h-full text-slate-500 dark:text-slate-400">
               <span className="text-lg font-bold">FILE</span>
               <span className="text-[9px] mt-0.5">OPEN</span>
-            </a>
+            </button>
           ) : (
             <div className="text-center text-rose-500">
               <div className="text-lg">—</div>
@@ -5455,7 +5491,7 @@ function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null, compa
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-3">
             {doc.file_url ? (
-              <a href={doc.file_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline">View full size ↗</a>
+              <button type="button" onClick={() => setPreviewOpen(true)} className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline">View full size ↗</button>
             ) : rejectedNote ? null : (
               <span className="text-xs font-semibold text-rose-500">Missing document</span>
             )}
@@ -5487,6 +5523,7 @@ function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null, compa
           {uploadError && <p className="text-rose-500 text-xs mt-1">{uploadError}</p>}
         </div>
       )}
+      {previewOpen && doc.file_url && <DocPreviewModal doc={doc} isImage={isImage} isPdf={isPdf} onClose={() => setPreviewOpen(false)} />}
       {cropFile && (
         <ImageCropModal
           file={cropFile}
