@@ -4401,10 +4401,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
 
   const [answers, setAnswers] = useState(() => {
     const existing = Object.entries(app.service_answers || {}).map(([key, value]) => ({ key, value: String(value) }));
-    const defaults = ["Application No", "Learner No", "PCC No"]
-      .filter((k) => !existing.some((row) => row.key === k))
-      .map((k) => ({ key: k, value: "" }));
-    return [...existing, ...defaults];
+    return existing;
   });
   const [savingAnswers, setSavingAnswers] = useState(false);
 
@@ -4794,7 +4791,6 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
           {/* Column 2: service answers, documents, chat */}
           <div>
             <Card title="Service Answers" className="!p-4 mb-3 overflow-hidden">
-              <div className="mb-3 rounded-lg border border-blue-100 dark:border-blue-900/40 bg-blue-50/60 dark:bg-blue-950/20 px-3 py-2 text-[11px] text-slate-500 dark:text-slate-400">Application, Learner and PCC numbers can be updated here without opening another screen.</div>
               {answers.map((row, i) => {
                 // Same loose key match as getLearnerNo — lets staff click the
                 // Learner No value here to jump straight to Sarathi, same as
