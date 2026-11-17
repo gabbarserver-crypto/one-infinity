@@ -41,6 +41,7 @@ const ICONS = {
   chats: MessageSquare,
   masters: Database,
   payments: Receipt,
+  paymentEntries: Receipt,
   paymentsReport: IndianRupee,
   ledger: BookOpen,
   dealerLedger: BookOpen,

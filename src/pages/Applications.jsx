@@ -881,7 +881,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     const buildQuery = () => {
       let query = supabase
         .from("applications")
-        .select(`*, dealers(name,code,short_name), ${servicesEmbed}, staff:assigned_staff_id(full_name), accepted_staff:accepted_by(full_name), created_by_staff:created_by_dealer_staff_id(full_name)`)
+        .select(`*, dealers(name,code,short_name), ${servicesEmbed}, staff:assigned_staff_id(full_name), accepted_staff:accepted_by(full_name), created_by_staff:created_by_dealer_staff_id(full_name), created_by_admin:created_by_admin_staff_id(full_name)`)
         .order("submitted_at", { ascending: false })
         .order("id", { ascending: false }); // unique tiebreaker so paging is stable
       // "Under Review" isn't a status value that ever actually gets stored —
@@ -1086,7 +1086,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     // assignment — and was causing "assigned staff not showing" on reopen).
     const { data: freshRow } = await supabase
       .from("applications")
-      .select("*, dealers(name,code,short_name), services(parent_service,short_name,pcc_required,rto_required,agency_required,slot_booking_required,chat_in_app,next_service_id,next_service_wait_days,age_limit_required,min_age,application_no_required,ll_dl_no_required), staff:assigned_staff_id(full_name), accepted_staff:accepted_by(full_name), fee_staff:fee_entered_by(full_name), appno_staff:application_no_entered_by(full_name), lldl_staff:ll_dl_no_entered_by(full_name), amount_staff:amount_entered_by(full_name), created_by_staff:created_by_dealer_staff_id(full_name)")
+      .select("*, dealers(name,code,short_name), services(parent_service,short_name,pcc_required,rto_required,agency_required,slot_booking_required,chat_in_app,next_service_id,next_service_wait_days,age_limit_required,min_age,application_no_required,ll_dl_no_required), staff:assigned_staff_id(full_name), accepted_staff:accepted_by(full_name), fee_staff:fee_entered_by(full_name), appno_staff:application_no_entered_by(full_name), lldl_staff:ll_dl_no_entered_by(full_name), amount_staff:amount_entered_by(full_name), created_by_staff:created_by_dealer_staff_id(full_name), created_by_admin:created_by_admin_staff_id(full_name)")
       .eq("id", row.id)
       .maybeSingle();
     let docs = (await supabase.from("application_documents").select("*").eq("application_id", row.id)).data || [];
@@ -1783,6 +1783,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
       service_answers: form.service_answers && Object.keys(form.service_answers).length ? form.service_answers : null,
       status: form.status,
       rto_id: autoRtoId,
+      created_by_admin_staff_id: staff?.id || null, // our own staff who keyed this draft in on the dealer's behalf
     }).select().single();
     if (error) {
       setToast("Failed to create: " + error.message);
@@ -1803,7 +1804,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
   // Learner's Licence -> Driving Licence (or whatever Next Service is
   // configured) — creates the follow-up draft from BookAppointmentModal.
   const bookAppointment = async (payload) => {
-    const { data: newApp, error } = await supabase.from("applications").insert(payload).select().single();
+    const { data: newApp, error } = await supabase.from("applications").insert({ ...payload, created_by_admin_staff_id: staff?.id || null }).select().single();
     if (error) throw new Error(error.message);
     await copyRequiredDocuments(newApp.id, payload.service_id);
     await copyForwardDocuments(bookingApp.sourceApp.id, newApp.id);
@@ -4683,11 +4684,19 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
               {(app.history || []).map((h) => (
                 <div key={h.id} className="text-xs text-slate-500 dark:text-slate-500 py-1.5 border-b border-slate-100 dark:border-slate-800 last:border-0">
                   <span className="font-semibold text-slate-700 dark:text-slate-300">{h.status}</span> — {new Date(h.changed_at).toLocaleString()}
-                  {h.status === "Draft Submitted" && app.dealers?.name && (
+                  {h.status === "Draft Submitted" && (app.created_by_admin?.full_name || app.dealers?.name) && (
                     <div className="text-slate-400 dark:text-slate-500 mt-0.5">
-                      by <span className="font-semibold text-slate-600 dark:text-slate-400">{app.dealers.name}</span>
-                      {app.created_by_staff?.full_name && (
-                        <> — <span className="font-semibold text-slate-600 dark:text-slate-400">{app.created_by_staff.full_name}</span></>
+                      by{" "}
+                      {app.created_by_admin?.full_name ? (
+                        // Staff keyed it in on the dealer's behalf -> show that staff member.
+                        <span className="font-semibold text-slate-600 dark:text-slate-400">{app.created_by_admin.full_name}</span>
+                      ) : (
+                        <>
+                          <span className="font-semibold text-slate-600 dark:text-slate-400">{app.dealers.name}</span>
+                          {app.created_by_staff?.full_name && (
+                            <> — <span className="font-semibold text-slate-600 dark:text-slate-400">{app.created_by_staff.full_name}</span></>
+                          )}
+                        </>
                       )}
                     </div>
                   )}
@@ -4933,11 +4942,19 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
               {(app.history || []).map((h) => (
                 <div key={h.id} className="text-xs text-slate-500 dark:text-slate-500 py-1.5 border-b border-slate-100 dark:border-slate-800 last:border-0">
                   <span className="font-semibold text-slate-700 dark:text-slate-300">{h.status}</span> — {new Date(h.changed_at).toLocaleString()}
-                  {h.status === "Draft Submitted" && app.dealers?.name && (
+                  {h.status === "Draft Submitted" && (app.created_by_admin?.full_name || app.dealers?.name) && (
                     <div className="text-slate-400 dark:text-slate-500 mt-0.5">
-                      by <span className="font-semibold text-slate-600 dark:text-slate-400">{app.dealers.name}</span>
-                      {app.created_by_staff?.full_name && (
-                        <> — <span className="font-semibold text-slate-600 dark:text-slate-400">{app.created_by_staff.full_name}</span></>
+                      by{" "}
+                      {app.created_by_admin?.full_name ? (
+                        // Staff keyed it in on the dealer's behalf -> show that staff member.
+                        <span className="font-semibold text-slate-600 dark:text-slate-400">{app.created_by_admin.full_name}</span>
+                      ) : (
+                        <>
+                          <span className="font-semibold text-slate-600 dark:text-slate-400">{app.dealers.name}</span>
+                          {app.created_by_staff?.full_name && (
+                            <> — <span className="font-semibold text-slate-600 dark:text-slate-400">{app.created_by_staff.full_name}</span></>
+                          )}
+                        </>
                       )}
                     </div>
                   )}

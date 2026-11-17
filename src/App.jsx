@@ -15,6 +15,7 @@ import Applications, { StaffApplications, StaffDraftApplications, DraftApplicati
 import PccApplications from "./pages/PccApplications";
 import { LearningApplications, DlApplications, fetchUpcomingSlotCount } from "./pages/LicenceApplications";
 import Ledger from "./pages/Ledger";
+import PaymentEntries from "./pages/PaymentEntries";
 import Masters from "./pages/Masters";
 import Settings from "./pages/Settings";
 import Chats from "./pages/Chats";
@@ -71,6 +72,7 @@ const NAV = [
   { key: "dlApplications", label: "DL", Component: DlApplications },
   { key: "chats", label: "Call/Chat", Component: Chats },
   { key: "masters", label: "Masters", Component: Masters },
+  { key: "paymentEntries", label: "Payment Entry", Component: PaymentEntries },
   { key: "ledger", label: "Ledger", Component: Ledger },
   { key: "dealerLedger", label: "Dealer", Component: DealerLedgerPage },
   { key: "agencyLedger", label: "Agency", Component: AgencyLedgerPage },
@@ -105,6 +107,8 @@ const MODULE_BY_NAV_KEY = {
   dlApplications: "applications",
   chats: "chats",
   masters: "masters",
+  // Staff-entered payments awaiting Admin verification (see PaymentEntries.jsx).
+  paymentEntries: "paymentEntry",
   ledger: "ledger",
   dealerLedger: "ledger",
   agencyLedger: "ledger",
@@ -154,6 +158,8 @@ export default function App() {
   // Count of applications still sitting in "Draft Submitted" — shown as a
   // badge on the Draft tab, mirroring the Call/Chat unread badge.
   const [pendingDraftCount, setPendingDraftCount] = useState(0);
+  // Staff payment entries waiting for Admin verification — badge on Payment Entry (Admin only).
+  const [pendingPaymentCount, setPendingPaymentCount] = useState(0);
   // DL applications whose slot date is today or ahead — red badge on DL.
   const [upcomingSlotCount, setUpcomingSlotCount] = useState(0);
   const [permMap, setPermMap] = useState({}); // { [module]: permissions row } for the staff member's role
@@ -228,6 +234,30 @@ export default function App() {
       // Best-effort — same as chat count, leave the last-known value in place.
     }
   }, []);
+
+  const refreshPendingPaymentCount = useCallback(async () => {
+    try {
+      const { count, error } = await supabase
+        .from("staff_payment_entries")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "Pending");
+      if (error) throw error;
+      setPendingPaymentCount(count || 0);
+    } catch {
+      // Best-effort — leave the last-known value in place.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!staff || !isAdmin) return;
+    refreshPendingPaymentCount();
+    const payInterval = setInterval(refreshPendingPaymentCount, 30000);
+    window.addEventListener("payment-entries-changed", refreshPendingPaymentCount);
+    return () => {
+      clearInterval(payInterval);
+      window.removeEventListener("payment-entries-changed", refreshPendingPaymentCount);
+    };
+  }, [staff, isAdmin, refreshPendingPaymentCount]);
 
   const refreshUpcomingSlotCount = useCallback(async () => {
     try {
@@ -648,7 +678,7 @@ export default function App() {
         active={active}
         onNavigate={(key) => { setActive(key); refreshPendingChatCount(); refreshPendingDraftCount(); refreshUpcomingSlotCount(); }}
         staff={staff}
-        badges={{ chats: pendingChatCount, draftApplications: pendingDraftCount, staffDraftApplications: pendingDraftCount, dlApplications: upcomingSlotCount }}
+        badges={{ chats: pendingChatCount, draftApplications: pendingDraftCount, staffDraftApplications: pendingDraftCount, dlApplications: upcomingSlotCount, paymentEntries: pendingPaymentCount }}
         onLogout={() => supabase.auth.signOut()}
       />
       <main
@@ -675,7 +705,7 @@ export default function App() {
           setActive(key);
           refreshPendingChatCount();
         }}
-        badges={{ chats: pendingChatCount, draftApplications: pendingDraftCount, staffDraftApplications: pendingDraftCount, dlApplications: upcomingSlotCount }}
+        badges={{ chats: pendingChatCount, draftApplications: pendingDraftCount, staffDraftApplications: pendingDraftCount, dlApplications: upcomingSlotCount, paymentEntries: pendingPaymentCount }}
       />
       <CommsWindow
         ref={commsWindowRef}
