@@ -3396,47 +3396,43 @@ function ImportApplicationsModal({ dealerList, serviceList, rtoList, agencyList,
         });
       }
 
-      // Rows imported directly as Completed skip the normal "Mark
-      // Completed" action entirely, so post the matching ledger row here
-      // — same shape as complete_application() — for any imported row
-      // that's already at that stage. Backdated to the row's own
-      // Application Date (when the CSV provided one) rather than
-      // defaulting to "now", and Agency Fee/Agency ride along on the same
-      // row (it's one ledger_entries row per application now, not a
-      // separate agency ledger table).
-      const preCompleted = insertedRows.filter((r) => r.status === "Completed");
-      if (preCompleted.length) {
-        const ledgerRows = preCompleted.map((r) => {
-          const service = serviceList.find((s) => s.id === r.service_id);
-          return {
-            entry_code: r.application_no || `APP-${r.id.slice(0, 8)}`,
-            entry_type: "SERVICE",
-            entry_date: r.application_date || todayIST(),
-            dealer_id: r.dealer_id,
-            agency_id: r.agency_id || null,
-            applicant_name: r.applicant_name,
-            service_type: serviceLabel(service) || null,
-            amount: r.amount || 0,
-            rto_fee: r.rto_fee || null,
-            agency_fee: r.agency_fee || null,
-            dob: r.date_of_birth || null,
-            license_no: r.ll_dl_no || null,
-            address: r.address || null,
-            contact_no: r.mobile || null,
-            source_application_id: r.id,
-          };
+      // Imported rows never go through the normal "type the LL/DL No. / PCC No.
+      // -> auto-complete" step, so post their ledger entry here, the same way
+      // the app does it: complete_application() marks the row Completed and
+      // writes its SERVICE ledger row (dated on the row's own Application Date,
+      // a no-op if the row already has one). Only rows that are Accepted and
+      // already carry an LL/DL No. or PCC No. are completed — the rest stay
+      // Accepted and complete later when that number is entered.
+      const toComplete = insertedRows.filter(
+        (r) => r.status === "Accepted" && (String(r.ll_dl_no || "").trim() || String(r.pcc_no || "").trim())
+      );
+      const ledgerFailures = [];
+      let ledgerPosted = 0;
+      const COMPLETE_BATCH = 20;
+      for (let i = 0; i < toComplete.length; i += COMPLETE_BATCH) {
+        const batch = toComplete.slice(i, i + COMPLETE_BATCH);
+        const results = await Promise.all(
+          batch.map((r) => supabase.rpc("complete_application", { p_application_id: r.id }))
+        );
+        results.forEach((res, idx) => {
+          if (res.error) ledgerFailures.push({ draft_code: batch[idx].draft_code, applicant_name: batch[idx].applicant_name, message: res.error.message });
+          else ledgerPosted += 1;
         });
-        const { error: ledgerError } = await supabase.from("ledger_entries").insert(ledgerRows);
-        if (ledgerError) {
-          setError(`Applications imported, but ${preCompleted.length} ledger entr${preCompleted.length !== 1 ? "ies" : "y"} failed to post: ` + ledgerError.message);
-          setImporting(false);
-          setProgress(null);
-          return;
-        }
+        setProgress({
+          done: rowsToImport.length + payloads.length,
+          total: totalSteps,
+          label: `Posting ledger entries ${Math.min(i + COMPLETE_BATCH, toComplete.length).toLocaleString("en-IN")} of ${toComplete.length.toLocaleString("en-IN")}…`,
+        });
+      }
+      if (ledgerFailures.length) {
+        setError(
+          `Applications imported, but ${ledgerFailures.length} ledger entr${ledgerFailures.length !== 1 ? "ies" : "y"} failed to post (e.g. ${ledgerFailures[0].draft_code}: ${ledgerFailures[0].message}). Those rows are still Accepted — typing their LL/DL No. or PCC No. will post them.`
+        );
       }
 
       setResult({
         imported: insertedRows.length,
+        ledgerPosted,
         skipped: preview.length - rowsToImport.length,
         duplicates,
         failures,
