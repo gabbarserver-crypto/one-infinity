@@ -6,6 +6,8 @@ import SearchableSelect, { dealerOptionLabel } from "../components/SearchableSel
 import StaffQrSendPanel from "../components/StaffQrSendPanel";
 import { fmtDate } from "../lib/dates";
 
+// Dealer payment modes that land in the bank account (lower-case).
+const BANK_IN_MODES = new Set(["upi", "bank", "cheque"]);
 const EMPTY_FORM = { payment_type: "dealer", dealer_id: "", to_dealer_id: "", application_id: "", amount: "", payment_mode: "Cash", reference_no: "", remarks: "", paid_at_agency_id: "", paid_on: "" };
 
 export default function Payments({ staff } = {}) {
@@ -90,10 +92,10 @@ export default function Payments({ staff } = {}) {
     }
   };
 
-  // Money IN: dealer payments collected via UPI (UPI lands straight in the
-  // bank; Cash/Bank-transfer-at-counter/Cheque from a dealer don't).
+  // Money IN: dealer payments received into the bank — UPI, Bank transfer and
+  // Cheque (only Cash from a dealer never touches the bank).
   const bankUpiReceived = React.useMemo(() => allPayments
-    .filter((p) => p.dealer_id && p.payment_mode === "UPI")
+    .filter((p) => p.dealer_id && BANK_IN_MODES.has(String(p.payment_mode || "").toLowerCase()))
     .reduce((acc, p) => acc + Number(p.amount || 0), 0), [allPayments]);
   // Money OUT to agencies: a direct agency payment (no dealer involved)
   // sent by Bank/UPI/Cheque comes straight out of the bank; Cash paid at

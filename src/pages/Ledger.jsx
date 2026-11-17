@@ -1070,6 +1070,9 @@ async function loadFeeApplications() {
 function BankTab() {
   const [viewRows, setViewRows] = useState([]);
   const [apps, setApps] = useState([]);
+  // Dealer payments received by Bank transfer / Cheque (entered by hand via Record
+  // Payment). The bank_ledger view only totals UPI, so these are added on top here.
+  const [extraIn, setExtraIn] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [rangeFrom, setRangeFrom] = useState("");
@@ -1087,6 +1090,14 @@ function BankTab() {
         if (error) throw error;
         setViewRows(data || []);
         setApps(appRows);
+        const extra = await fetchAllRows(() =>
+          supabase.from("payments").select("id, amount, created_at")
+            .not("dealer_id", "is", null)
+            .or("payment_mode.ilike.bank,payment_mode.ilike.cheque")
+            .order("id")
+        );
+        if (extra.error) throw extra.error;
+        setExtraIn(extra.data || []);
         setLoadError(null);
       } catch (e) {
         setLoadError(e?.message || "Couldn't load bank ledger");
@@ -1101,7 +1112,7 @@ function BankTab() {
   const { dayRows, feeItemsByDate } = useMemo(() => {
     const days = new Map();
     const ensure = (d) => {
-      if (!days.has(d)) days.set(d, { entry_date: d, rto: 0, pcc: 0, upi: 0, viewFee: 0, viewBalance: null });
+      if (!days.has(d)) days.set(d, { entry_date: d, rto: 0, pcc: 0, upi: 0, extra: 0, viewFee: 0, viewBalance: null });
       return days.get(d);
     };
     const items = new Map(); // date -> { rto: [], pcc: [] }
@@ -1115,6 +1126,15 @@ function BankTab() {
       d.viewFee = Number(v.fee_paid || 0);
       d.viewBalance = Number(v.bank_balance || 0);
     });
+    // Bank / Cheque payments received from dealers count as money in, on the day
+    // they were recorded (IST), exactly like UPI.
+    extraIn.forEach((p) => {
+      const amt = Number(p.amount || 0);
+      if (!amt || !p.created_at) return;
+      const d = ensure(todayIST(new Date(p.created_at)));
+      d.upi += amt;
+      d.extra += amt;
+    });
     apps.forEach((a) => {
       const base = { id: a.id, draft: a.draft_code, name: a.applicant_name, dealer: a.dealers?.name };
       if (Number(a.rto_fee) > 0) {
@@ -1127,16 +1147,17 @@ function BankTab() {
       }
     });
     const asc = [...days.values()].sort((x, y) => x.entry_date.localeCompare(y.entry_date));
-    let carry = 0, cumViewFee = 0, cumNewFee = 0;
+    let carry = 0, cumViewFee = 0, cumNewFee = 0, cumExtra = 0;
     asc.forEach((d) => {
       if (d.viewBalance !== null) carry = d.viewBalance;
       cumViewFee += d.viewFee;
       cumNewFee += d.rto + d.pcc;
+      cumExtra += d.extra;
       d.net = d.upi - d.rto - d.pcc;
-      d.balance = carry + cumViewFee - cumNewFee;
+      d.balance = carry + cumViewFee - cumNewFee + cumExtra;
     });
     return { dayRows: asc.reverse(), feeItemsByDate: items }; // newest first
-  }, [viewRows, apps]);
+  }, [viewRows, apps, extraIn]);
 
   const todayRow = dayRows.find((r) => r.entry_date === today);
   const latestBalance = dayRows[0]?.balance ?? 0;
@@ -1163,7 +1184,7 @@ function BankTab() {
           <p className="text-xl font-bold text-rose-600 mt-1">{inr(todayRow?.pcc)}</p>
         </Card>
         <Card>
-          <p className="text-xs text-slate-400 dark:text-slate-500">Received in Bank Today (UPI)</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500">Received in Bank Today (UPI / Bank / Cheque)</p>
           <p className="text-xl font-bold text-emerald-600 mt-1">{inr(todayRow?.upi)}</p>
         </Card>
         <Card>
@@ -1197,7 +1218,7 @@ function BankTab() {
           <span className="text-xs text-slate-400 dark:text-slate-500 ml-2">
             Period total — RTO Fee: <span className="text-rose-600 font-semibold">{inr(periodTotals.rto)}</span>
             {" · "}PCC Fee: <span className="text-rose-600 font-semibold">{inr(periodTotals.pcc)}</span>
-            {" · "}UPI Received: <span className="text-emerald-600 font-semibold">{inr(periodTotals.upi)}</span>
+            {" · "}Received: <span className="text-emerald-600 font-semibold">{inr(periodTotals.upi)}</span>
           </span>
         )}
       </div>
@@ -1210,7 +1231,7 @@ function BankTab() {
               <th className="px-3 py-2 text-left">Date</th>
               <th className="px-3 py-2 text-right">RTO Fee</th>
               <th className="px-3 py-2 text-right">PCC Fee</th>
-              <th className="px-3 py-2 text-right">UPI Received</th>
+              <th className="px-3 py-2 text-right">Received</th>
               <th className="px-3 py-2 text-right">Net</th>
               <th className="px-3 py-2 text-right">Bank Balance</th>
             </tr>
@@ -1270,7 +1291,7 @@ function BankDayModal({ date, day, feeItems, onClose }) {
       const { data, error } = await supabase
         .from("payments")
         .select("id, amount, payment_mode, created_at, dealer_id, dealers(name), applications(draft_code, applicant_name)")
-        .eq("payment_mode", "UPI")
+        .or("payment_mode.eq.UPI,payment_mode.ilike.bank,payment_mode.ilike.cheque")
         .not("dealer_id", "is", null)
         .gte("created_at", istDayStart(date))
         .lt("created_at", istNextDayStart(date))
@@ -1310,7 +1331,7 @@ function BankDayModal({ date, day, feeItems, onClose }) {
           {[
             ["RTO Fee", inr(day.rto), "text-rose-600"],
             ["PCC Fee", inr(day.pcc), "text-rose-600"],
-            ["UPI In", inr(day.upi), "text-emerald-600"],
+            ["Received", inr(day.upi), "text-emerald-600"],
             ["Balance", inr(day.balance), "text-slate-800 dark:text-slate-100"],
           ].map(([l, v, c]) => (
             <div key={l} className="rounded-lg border border-slate-200 dark:border-slate-800 py-2">
@@ -1330,18 +1351,18 @@ function BankDayModal({ date, day, feeItems, onClose }) {
           <Row key={`p-${i.id}`} left={`${i.draft || "Application"}${i.name ? ` — ${i.name}` : ""}`} sub={`${i.pccNo ? `PCC ${i.pccNo} · ` : ""}${i.source}`} amount={i.amount} tone="text-rose-600" />
         ))}
       </Section>
-      <Section title={`UPI Received${upi ? ` (${upi.length})` : ""}`} total={upi ? upiTotal : day?.upi || 0} tone="text-emerald-600" empty={upi !== null && !upi.length}>
+      <Section title={`Received in Bank — UPI / Bank / Cheque${upi ? ` (${upi.length})` : ""}`} total={upi ? upiTotal : day?.upi || 0} tone="text-emerald-600" empty={upi !== null && !upi.length}>
         {upi === null ? <p className="px-3 py-2 text-xs text-slate-400">Loading…</p> : upi.map((p) => (
           <Row
             key={p.id}
             left={`${p.dealers?.name || "Dealer"}${p.applications?.draft_code ? ` — ${p.applications.draft_code}` : ""}`}
-            sub={`${time(p.created_at)}${p.applications?.applicant_name ? ` · ${p.applications.applicant_name}` : ""}`}
+            sub={`${time(p.created_at)} · ${p.payment_mode}${p.applications?.applicant_name ? ` · ${p.applications.applicant_name}` : ""}`}
             amount={p.amount}
             tone="text-emerald-600"
           />
         ))}
       </Section>
-      {err && <p className="text-xs text-amber-600">Couldn't load UPI payments: {err}</p>}
+      {err && <p className="text-xs text-amber-600">Couldn't load bank receipts: {err}</p>}
     </Modal>
   );
 }

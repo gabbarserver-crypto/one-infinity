@@ -107,7 +107,7 @@ export default function PaymentRegisters({ view = "bank", isAdmin = false }) {
       });
     });
     allPayments.forEach((p) => {
-      if (p.dealer_id && p.payment_mode === "UPI") {
+      if (p.dealer_id && ["upi", "bank", "cheque"].includes(String(p.payment_mode || "").toLowerCase())) {
         rows.push({
           id: `dealer-${p.id}`,
           date: p.created_at,
