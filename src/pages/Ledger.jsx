@@ -775,7 +775,7 @@ export default function Ledger({ only, initialEntityId, isAdmin = false, staff }
               <Row label="Status" value={appDetail.status} />
               <Row label="Service" value={appDetail.services?.short_name || appDetail.services?.parent_service} />
               <Row label="Dealer" value={appDetail.dealers?.name} />
-              <Row label="Assigned Staff" value={appDetail.staff?.full_name} />
+              {appDetail.staff?.full_name && <Row label="Assigned Staff" value={appDetail.staff.full_name} />}
               <div className="flex justify-between items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-2">
                 <span className="text-slate-400 dark:text-slate-500">Amount</span>
                 <div className="flex items-center gap-2">

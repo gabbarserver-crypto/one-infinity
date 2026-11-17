@@ -282,6 +282,26 @@ function AllSortTh({ label, sortKeyName, sortKey, sortDir, onSort, align = "left
 
 const payerName = (p) => p.dealers?.name || (p.paid_at_agency?.name ? `${p.paid_at_agency.name} (Agency)` : "—");
 
+// What a payments row actually is:
+//   receipt — a dealer paid us (money IN, no agency involved)
+//   payment — we paid an agency directly (money OUT, no dealer involved)
+//   both    — dealer -> agency: the dealer paid an agency on our behalf, so it
+//             is a receipt from the dealer AND a payment to the agency.
+const kindOf = (p) => (p.dealer_id && p.paid_at_agency_id ? "both" : p.dealer_id ? "receipt" : "payment");
+const KIND_LABEL = { receipt: "Receipt", payment: "Payment", both: "Dealer → Agency" };
+const KIND_STYLE = {
+  receipt: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+  payment: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
+  both: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+};
+const isReceiptRow = (p) => !!p.dealer_id;           // money came in from a dealer
+const isPaymentRow = (p) => !!p.paid_at_agency_id;   // money went out to an agency
+// "Dealer" / "→ Agency" / "Dealer → Agency"
+const partyLabel = (p) =>
+  p.dealer_id && p.paid_at_agency_id ? `${p.dealers?.name || "Dealer"} → ${p.paid_at_agency?.name || "Agency"}`
+  : p.dealer_id ? (p.dealers?.name || "Dealer")
+  : `→ ${p.paid_at_agency?.name || "Agency"}`;
+
 // Rows drawn at a time in the two big tables (the rest load on "Show more").
 const TABLE_PAGE = 200;
 
@@ -290,17 +310,19 @@ function AllPaymentsTableInner({ payments, loading, query, setQuery, dateFrom, s
   const [sortKey, setSortKey] = useState("date");
   const [sortDir, setSortDir] = useState("desc");
   const [limit, setLimit] = useState(TABLE_PAGE);
+  const [kindFilter, setKindFilter] = useState(""); // "", receipt, payment, both
 
   const toggleSort = (key) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else { setSortKey(key); setSortDir(key === "amount" || key === "date" ? "desc" : "asc"); }
+    else { setSortKey(key); setSortDir(key === "amount" || key === "receipt" || key === "payment" || key === "date" ? "desc" : "asc"); }
   };
 
   const filtered = React.useMemo(() => payments
     .filter((p) => {
+      if (kindFilter && kindOf(p) !== kindFilter) return false;
       if (query.trim()) {
         const q = query.trim().toLowerCase();
-        const haystack = [payerName(p), p.applications?.draft_code, p.reference_no, p.remarks, p.payment_mode].filter(Boolean).join(" ").toLowerCase();
+        const haystack = [payerName(p), p.dealers?.name, p.paid_at_agency?.name, KIND_LABEL[kindOf(p)], p.applications?.draft_code, p.reference_no, p.remarks, p.payment_mode].filter(Boolean).join(" ").toLowerCase();
         if (!haystack.includes(q)) return false;
       }
       const paidDate = p.created_at?.slice(0, 10);
@@ -311,6 +333,9 @@ function AllPaymentsTableInner({ payments, loading, query, setQuery, dateFrom, s
     .sort((a, b) => {
       let av, bv;
       if (sortKey === "amount") { av = Number(a.amount) || 0; bv = Number(b.amount) || 0; }
+      else if (sortKey === "receipt") { av = isReceiptRow(a) ? Number(a.amount) || 0 : -1; bv = isReceiptRow(b) ? Number(b.amount) || 0 : -1; }
+      else if (sortKey === "payment") { av = isPaymentRow(a) ? Number(a.amount) || 0 : -1; bv = isPaymentRow(b) ? Number(b.amount) || 0 : -1; }
+      else if (sortKey === "type") { av = kindOf(a); bv = kindOf(b); }
       else if (sortKey === "payer") { av = payerName(a).toLowerCase(); bv = payerName(b).toLowerCase(); }
       else if (sortKey === "application") { av = (a.applications?.draft_code || "").toLowerCase(); bv = (b.applications?.draft_code || "").toLowerCase(); }
       else if (sortKey === "mode") { av = (a.payment_mode || "").toLowerCase(); bv = (b.payment_mode || "").toLowerCase(); }
@@ -319,13 +344,13 @@ function AllPaymentsTableInner({ payments, loading, query, setQuery, dateFrom, s
       if (av < bv) return sortDir === "asc" ? -1 : 1;
       if (av > bv) return sortDir === "asc" ? 1 : -1;
       return 0;
-    }), [payments, query, dateFrom, dateTo, sortKey, sortDir]);
+    }), [payments, query, dateFrom, dateTo, sortKey, sortDir, kindFilter]);
 
   // Selection is cleared whenever the visible set changes (new search/date
   // filter) so it can never silently hold onto an id that's since scrolled
   // out of view — "select all" always means "all of what you're looking at
   // right now", not some stale set from before you changed the filter.
-  useEffect(() => { setSelected(new Set()); setLimit(TABLE_PAGE); }, [query, dateFrom, dateTo]);
+  useEffect(() => { setSelected(new Set()); setLimit(TABLE_PAGE); }, [query, dateFrom, dateTo, kindFilter]);
 
   // "Select all" covers the rows actually on screen, never rows still hidden
   // behind "Show more" (so a bulk delete can't hit rows you haven't seen).
@@ -342,7 +367,12 @@ function AllPaymentsTableInner({ payments, loading, query, setQuery, dateFrom, s
     });
   };
 
-  const total = React.useMemo(() => filtered.reduce((sum, p) => sum + Number(p.amount || 0), 0), [filtered]);
+  const { totalIn, totalOut } = React.useMemo(() => filtered.reduce((acc, p) => {
+    const amt = Number(p.amount || 0);
+    if (isReceiptRow(p)) acc.totalIn += amt;
+    if (isPaymentRow(p)) acc.totalOut += amt;
+    return acc;
+  }, { totalIn: 0, totalOut: 0 }), [filtered]);
 
   const exportCSV = () => {
     const escapeCsv = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -352,7 +382,7 @@ function AllPaymentsTableInner({ payments, loading, query, setQuery, dateFrom, s
       lines.push([
         escapeCsv(fmtDate(p.created_at)),
         escapeCsv(p.dealers?.name || p.paid_at_agency?.name || ""),
-        escapeCsv(p.dealer_id ? "Dealer" : "Agency"),
+        escapeCsv(KIND_LABEL[kindOf(p)]),
         escapeCsv(p.applications?.draft_code || ""),
         escapeCsv(p.amount),
         escapeCsv(p.payment_mode),
@@ -396,6 +426,22 @@ function AllPaymentsTableInner({ payments, loading, query, setQuery, dateFrom, s
         )}
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        {[["", "All"], ["receipt", "Receipts"], ["payment", "Payments"], ["both", "Dealer → Agency"]].map(([k, label]) => (
+          <button
+            key={k || "all"}
+            onClick={() => setKindFilter(k)}
+            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+              kindFilter === k
+                ? "bg-blue-600 text-white border-blue-600"
+                : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-slate-400"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <p className="text-sm text-slate-400 dark:text-slate-500 py-6 text-center">Loading…</p>
       ) : filtered.length === 0 ? (
@@ -403,11 +449,14 @@ function AllPaymentsTableInner({ payments, loading, query, setQuery, dateFrom, s
       ) : (
         <>
           <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">
-            {filtered.length} payment{filtered.length !== 1 ? "s" : ""} · ₹{total.toLocaleString("en-IN")} total
+            {filtered.length} entr{filtered.length !== 1 ? "ies" : "y"} · Receipts (in):{" "}
+            <span className="font-semibold text-emerald-600">₹{totalIn.toLocaleString("en-IN")}</span> · Payments (out):{" "}
+            <span className="font-semibold text-rose-600">₹{totalOut.toLocaleString("en-IN")}</span>
+            <span className="ml-2 opacity-70">(Dealer → Agency counts in both)</span>
           </p>
           <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg max-h-[480px] overflow-y-auto">
             <table className="m-scroll w-full text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-500 sticky top-0">
+              <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-500 sticky top-0 z-10">
                 <tr>
                   {isAdmin && (
                     <th className="px-3 py-2 text-left w-8">
@@ -415,11 +464,13 @@ function AllPaymentsTableInner({ payments, loading, query, setQuery, dateFrom, s
                     </th>
                   )}
                   <AllSortTh label="Date" sortKeyName="date" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                  <AllSortTh label="Payer" sortKeyName="payer" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <AllSortTh label="Type" sortKeyName="type" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <AllSortTh label="Dealer / Agency" sortKeyName="payer" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <AllSortTh label="Payment Mode" sortKeyName="mode" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <AllSortTh label="Reference No" sortKeyName="reference" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <th className="px-3 py-2 text-left">Remarks</th>
-                  <AllSortTh label="Amount" sortKeyName="amount" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
+                  <AllSortTh label="Receipt (In)" sortKeyName="receipt" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
+                  <AllSortTh label="Payment (Out)" sortKeyName="payment" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
                   {isAdmin && <th className="px-3 py-2 text-left">Actions</th>}
                 </tr>
               </thead>
@@ -432,11 +483,15 @@ function AllPaymentsTableInner({ payments, loading, query, setQuery, dateFrom, s
                       </td>
                     )}
                     <td className="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-500">{fmtDate(p.created_at)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-300">{payerName(p)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${KIND_STYLE[kindOf(p)]}`}>{KIND_LABEL[kindOf(p)]}</span>
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-300">{partyLabel(p)}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-500">{p.payment_mode}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-500">{p.receipt_no || p.reference_no || "—"}</td>
                     <td className="px-3 py-2 max-w-[220px] truncate text-slate-500 dark:text-slate-500" title={p.remarks || ""}>{p.remarks || "—"}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-right font-semibold text-emerald-600">₹{Number(p.amount).toLocaleString("en-IN")}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-right font-semibold text-emerald-600">{isReceiptRow(p) ? `₹${Number(p.amount).toLocaleString("en-IN")}` : ""}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-right font-semibold text-rose-600">{isPaymentRow(p) ? `₹${Number(p.amount).toLocaleString("en-IN")}` : ""}</td>
                     {isAdmin && (
                       <td className="px-3 py-2 whitespace-nowrap">
                         <button onClick={() => onEdit(p)} className="text-xs font-semibold text-blue-600 hover:underline mr-3">Edit</button>

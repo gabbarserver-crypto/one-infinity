@@ -18,6 +18,7 @@ export default function DocUploadDropzone({
   busy = false,
   accept = "image/*,.pdf",
   label = "Drop file here or tap to upload",
+  compact = false,
 }) {
   const inputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
@@ -43,7 +44,9 @@ export default function DocUploadDropzone({
         if (!busy) handleFiles(e.dataTransfer.files);
       }}
       className={[
-        "flex items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-3 text-xs font-semibold transition-colors select-none",
+        compact
+          ? "flex items-center justify-center gap-1 rounded-md border border-dashed px-2 py-1 text-[11px] font-semibold transition-colors select-none"
+          : "flex items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-3 text-xs font-semibold transition-colors select-none",
         busy ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
         dragOver
           ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600"

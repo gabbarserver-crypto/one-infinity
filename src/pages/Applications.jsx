@@ -1301,20 +1301,6 @@ export default function Applications({ restricted = false, canEdit = true, canAp
     load();
   };
 
-  const assignStaff = async (staffId) => {
-    const { error } = await supabase
-      .from("applications")
-      .update({ assigned_staff_id: staffId })
-      .eq("id", selected.id);
-    if (error) {
-      setToast("Assignment failed: " + error.message);
-      return;
-    }
-    setToast("Staff assigned");
-    setSelected((s) => ({ ...s, assigned_staff_id: staffId }));
-    load();
-  };
-
   // Fields where we additionally stamp who entered the value (and when),
   // for the audit "Entry Log" — Fee, Application No, and LL/DL No.
   const ENTRY_LOG_FIELDS = {
@@ -2775,7 +2761,7 @@ export default function Applications({ restricted = false, canEdit = true, canAp
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => openDetail(r, "status")}
-                      title={getProcessingStage(r) || (restricted ? "Accept or reject, view history" : "Assign staff, update status, view history")}
+                      title={getProcessingStage(r) || (restricted ? "Accept or reject, view history" : "Update status, view history")}
                       className="hover:opacity-80"
                     >
                       <StatusBadge status={r.status} />
@@ -2894,7 +2880,6 @@ export default function Applications({ restricted = false, canEdit = true, canAp
           onClose={closeDetail}
           onStatusChange={updateStatus}
           onDelete={deleteApplication}
-          onAssign={assignStaff}
           onSaveAnswers={updateAnswers}
           onSaveApplicant={updateApplicantDetails}
           onSaveField={updateRowField}
@@ -4295,9 +4280,8 @@ function RemarkPopup({ row, status, onCancel, onConfirm }) {
   );
 }
 
-function ApplicationDetailModal({ app, mode = "customer", staffList, restricted = false, canApprove = true, isAdmin = false, onlyDraft = false, rtoList = [], agencyList = [], dealerList = [], serviceList = [], onChangeService, onChangeDealer, onClose, onStatusChange, onDelete, onAssign, onSaveAnswers, onSaveApplicant, onSaveField, onSaveAmount, onSavePccFee, onSaveAgencyFee, onSaveAgencyId, onDocsChanged }) {
+function ApplicationDetailModal({ app, mode = "customer", staffList, restricted = false, canApprove = true, isAdmin = false, onlyDraft = false, rtoList = [], agencyList = [], dealerList = [], serviceList = [], onChangeService, onChangeDealer, onClose, onStatusChange, onDelete, onSaveAnswers, onSaveApplicant, onSaveField, onSaveAmount, onSavePccFee, onSaveAgencyFee, onSaveAgencyId, onDocsChanged }) {
   const [remarks, setRemarks] = useState(app.remarks || "");
-  const [staffId, setStaffId] = useState(app.assigned_staff_id || "");
   const [staffIdentity, setStaffIdentity] = useState(null);
   const [pccCheckApp, setPccCheckApp] = useState(null);
   const [showPccLetter, setShowPccLetter] = useState(false);
@@ -4440,13 +4424,12 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
   };
 
   // ONE Save for the whole popup: applicant details + service answers (+ the
-  // staff assignment in the admin popup). Operational Details fields still
+  // admin popup). Operational Details fields still
   // save by themselves as soon as they are edited.
   const saveAll = async () => {
     const ok = await saveApplicant();
     if (ok === false) return;
     await saveAnswers();
-    if (mode === "admin" && onAssign && staffId !== (app.assigned_staff_id || "")) await onAssign(staffId || null);
   };
   const SaveBar = (
     <div className="sticky bottom-0 -mx-6 -mb-6 mt-4 px-6 py-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3 z-10">
@@ -4633,7 +4616,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
 
   if (mode === "status") {
     return (
-      <Modal title={restricted ? `Accept — ${app.draft_code}` : `Status & Assignment — ${app.draft_code}`} onClose={onClose} wide>
+      <Modal title={restricted ? `Accept — ${app.draft_code}` : `Status — ${app.draft_code}`} onClose={onClose} wide>
         <div className="flex items-center gap-2 mb-5">
           <span className="text-sm text-slate-500 dark:text-slate-500">Current status:</span>
           <StatusBadge status={app.status} />
@@ -4648,17 +4631,6 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
         </div>
         <div className="grid md:grid-cols-2 gap-6">
           <div>
-            {!restricted && (
-              <Card title="Assign Staff" className="mb-4">
-                <Field label="Responsible Staff">
-                  <Select value={staffId} onChange={(e) => setStaffId(e.target.value)}>
-                    <option value="">— Unassigned —</option>
-                    {staffList.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
-                  </Select>
-                </Field>
-                <GhostButton onClick={() => onAssign(staffId || null)}>Save Assignment</GhostButton>
-              </Card>
-            )}
 
             <Card title="Update Status" className="overflow-hidden">
               {showForwardActions || showReject ? (
@@ -4738,7 +4710,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
     return (
       <>
       <Modal title="Application" onClose={onClose} size="xl">
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-slate-950/30 px-4 py-3 mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-800 dark:text-slate-100">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-slate-950/30 px-3 py-2 mb-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-slate-800 dark:text-slate-100">
           {!OperationalDetailsCard && (
             <>
           <span className="flex items-center gap-1.5">
@@ -4774,10 +4746,10 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
         </div>
         {QuickActionBar}
 
-        <div className="grid lg:grid-cols-[minmax(300px,1fr)_minmax(340px,1.1fr)_minmax(260px,0.8fr)] gap-5 items-start">
+        <div className="grid lg:grid-cols-[minmax(270px,0.9fr)_minmax(440px,1.5fr)_minmax(240px,0.75fr)] gap-3 items-start">
           {/* Column 1: applicant details + staff assignment */}
           <div>
-            <Card title="Applicant Details" className="mb-4 overflow-hidden">
+            <Card title="Applicant Details" className="!p-4 mb-3 overflow-hidden">
               <AadhaarFillButton compact hint="Press “Save” to keep these changes." onFill={(patch) => setApplicant((s) => ({ ...s, ...patch }))} />
               <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                 <Field label="Name"><Input value={applicant.applicant_name} onChange={setApplicantField("applicant_name")} /></Field>
@@ -4817,19 +4789,11 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
 
             {OperationalDetailsCard}
 
-            <Card title="Assign Staff">
-              <Field label="Responsible Staff">
-                <Select value={staffId} onChange={(e) => setStaffId(e.target.value)}>
-                  <option value="">— Unassigned —</option>
-                  {staffList.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
-                </Select>
-              </Field>
-            </Card>
           </div>
 
           {/* Column 2: service answers, documents, chat */}
           <div>
-            <Card title="Service Answers" className="mb-4 overflow-hidden">
+            <Card title="Service Answers" className="!p-4 mb-3 overflow-hidden">
               <div className="mb-3 rounded-lg border border-blue-100 dark:border-blue-900/40 bg-blue-50/60 dark:bg-blue-950/20 px-3 py-2 text-[11px] text-slate-500 dark:text-slate-400">Application, Learner and PCC numbers can be updated here without opening another screen.</div>
               {answers.map((row, i) => {
                 // Same loose key match as getLearnerNo — lets staff click the
@@ -4866,9 +4830,8 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
               </div>
             </Card>
 
-            <Card title="Documents" className="mb-4 overflow-hidden">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[11px] text-slate-400 dark:text-slate-500">Uploaded files are shown with a larger preview for quick verification.</span>
+            <Card title="Documents" className="!p-4 mb-3 overflow-hidden">
+              <div className="flex items-center justify-end mb-2">
                 <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">{(app.docs || []).filter((d) => !d.post_approval || app.status === "Accepted").length} files</span>
               </div>
               {pccNeeded(app) && (
@@ -4880,10 +4843,11 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
                 </button>
               )}
               {(app.docs || []).length === 0 && <p className="text-sm text-slate-400 dark:text-slate-500">No documents uploaded</p>}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {(app.docs || [])
                 .filter((d) => !d.post_approval || app.status === "Accepted")
                 .map((d) => (
-                  <div key={d.id}>
+                  <div key={d.id} className="min-w-0">
                     {/learn/i.test(d.name) && app.application_no && (
                       <button
                         onClick={async () => {
@@ -4922,13 +4886,14 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
                         ↗ Download PCC Certificate
                       </button>
                     )}
-                    <DocumentRow doc={d} applicationId={app.id} onChanged={onDocsChanged} rejectedNote={/pcc/i.test(d.name) ? pccRejectionReason(app) : null} />
+                    <DocumentRow compact doc={d} applicationId={app.id} onChanged={onDocsChanged} rejectedNote={/pcc/i.test(d.name) ? pccRejectionReason(app) : null} />
                   </div>
                 ))}
+              </div>
             </Card>
 
             {app.services?.chat_in_app && (
-              <Card title="Chat">
+              <Card title="Chat" className="!p-4">
                 <div className="h-80 -mx-5 -mb-5 border-t border-slate-200 dark:border-slate-800 overflow-hidden rounded-b-xl">
                   <ChatPanel
                     dealerId={app.dealer_id}
@@ -4943,7 +4908,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
 
           {/* Column 3: fee details, history, update status */}
           <div>
-            <Card title="Fee Details" className="mb-4 overflow-hidden">
+            <Card title="Fee Details" className="!p-4 mb-3 overflow-hidden">
               <div className="mb-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 p-3">
                 <div className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">Amount charged</div>
                 <div className="text-xl font-bold text-slate-900 dark:text-white mt-0.5">{fee(app.amount)}</div>
@@ -4960,7 +4925,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
               </div>
             </Card>
 
-            <Card title="Application History" className="mb-4 overflow-hidden">
+            <Card title="Application History" className="!p-4 mb-3 overflow-hidden">
               <EntryLog app={app} />
               {(app.history || []).length === 0 && <p className="text-sm text-slate-400 dark:text-slate-500">No history yet</p>}
               {(app.history || []).map((h) => (
@@ -4979,7 +4944,7 @@ function ApplicationDetailModal({ app, mode = "customer", staffList, restricted 
               ))}
             </Card>
 
-            <Card title="Update Status">
+            <Card title="Update Status" className="!p-4">
               {showForwardActions || showReject ? (
                 <Field label="Remarks (shown to dealer)">
                   <Input
@@ -5232,7 +5197,7 @@ const DOC_STATUS_STYLES = {
   Rejected: "bg-rose-50 text-rose-700",
 };
 
-function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null }) {
+function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null, compact = false }) {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -5376,6 +5341,82 @@ function DocumentRow({ doc, applicationId, onChanged, rejectedNote = null }) {
   const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(doc.file_url || "");
   const isPdf = /\.pdf($|\?)/i.test(doc.file_url || "");
   const statusClass = DOC_STATUS_STYLES[doc.status] || DOC_STATUS_STYLES.Pending;
+
+  const thumb = (
+    doc.file_url && isImage ? (
+      <a href={doc.file_url} target="_blank" rel="noreferrer" className="block w-full h-full" title="Open full-size document">
+        <img src={doc.file_url} alt={doc.name} className="w-full h-full object-cover hover:scale-[1.03] transition-transform" />
+      </a>
+    ) : doc.file_url && isPdf ? (
+      <a href={doc.file_url} target="_blank" rel="noreferrer" className="flex flex-col items-center justify-center w-full h-full text-rose-600 dark:text-rose-400 hover:bg-slate-200/60 dark:hover:bg-slate-700/60">
+        <span className="text-lg font-bold">PDF</span>
+        <span className="text-[9px] font-semibold mt-0.5">OPEN</span>
+      </a>
+    ) : doc.file_url ? (
+      <a href={doc.file_url} target="_blank" rel="noreferrer" className="flex flex-col items-center justify-center w-full h-full text-slate-500 dark:text-slate-400">
+        <span className="text-lg font-bold">FILE</span>
+        <span className="text-[9px] mt-0.5">OPEN</span>
+      </a>
+    ) : (
+      <div className="text-center text-rose-500">
+        <div className="text-lg">—</div>
+        <div className="text-[9px] font-semibold">MISSING</div>
+      </div>
+    )
+  );
+
+  // Compact card for the admin popup's 2-column Documents grid: preview on
+  // top, name + status under it, one thin action line, small upload button.
+  if (compact) {
+    return (
+      <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/40 overflow-hidden shadow-sm h-full flex flex-col">
+        <div className="h-24 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 flex items-center justify-center overflow-hidden">{thumb}</div>
+        <div className="p-2 flex-1 flex flex-col gap-1">
+          <div className="flex items-start justify-between gap-1.5">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate" title={doc.name}>{doc.name}</div>
+              {uploadedFileName ? (
+                <div className="text-[10px] text-slate-400 dark:text-slate-500 truncate" title={uploadedFileName}>{uploadedFileName}</div>
+              ) : rejectedNote ? null : (
+                <div className="text-[10px] text-rose-500">No file uploaded yet</div>
+              )}
+            </div>
+            <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold whitespace-nowrap ${rejectedNote ? DOC_STATUS_STYLES.Rejected || statusClass : statusClass}`}>{rejectedNote ? "Rejected" : doc.status || "Pending"}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            {doc.file_url && (
+              <a href={doc.file_url} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline">View ↗</a>
+            )}
+            {doc.file_url && isImage && (
+              <button disabled={busy || uploading || loadingEdit} onClick={openEditor} className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 disabled:opacity-50">
+                {loadingEdit ? "Loading…" : "⟳ Rotate"}
+              </button>
+            )}
+            {doc.file_url && doc.status !== "Rejected" && doc.status !== "Verified" && (
+              <button disabled={busy} onClick={() => setStatus("Verified")} className="text-[11px] font-semibold text-emerald-600 disabled:opacity-50">✓ Verify</button>
+            )}
+            {doc.file_url && doc.status !== "Rejected" && (
+              <button disabled={busy} onClick={() => setStatus("Rejected")} className="text-[11px] font-semibold text-rose-500 disabled:opacity-50">Reject</button>
+            )}
+          </div>
+          {rejectedNote && <div className="rounded bg-rose-50 dark:bg-rose-950/20 px-2 py-1 text-[10px] text-rose-600 dark:text-rose-400">PCC Rejected — {rejectedNote}</div>}
+          {doc.status === "Rejected" && doc.reject_reason && <div className="rounded bg-rose-50 dark:bg-rose-950/20 px-2 py-1 text-[10px] text-rose-600 dark:text-rose-400">Reason: {doc.reject_reason}</div>}
+          {!rejectedNote && (
+            <div className="mt-auto pt-1">
+              <DocUploadDropzone compact busy={uploading} onFile={uploadFile} label={doc.file_url ? "Replace file" : "Upload file"} />
+              {uploadError && <p className="text-rose-500 text-[10px] mt-1">{uploadError}</p>}
+            </div>
+          )}
+        </div>
+        {cropFile && (
+          <ImageCropModal file={cropFile} allowBackgroundRemoval onClose={() => setCropFile(null)} onDone={(f) => { setCropFile(null); uploadFileNow(f); }} />
+        )}
+        {editFile && (
+          <ImageCropModal file={editFile} title="Rotate / Crop" doneLabel="Save" allowBackgroundRemoval={/sign/i.test(doc.name)} onClose={() => setEditFile(null)} onDone={saveEdited} />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="mb-3 last:mb-0 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/40 overflow-hidden shadow-sm">
