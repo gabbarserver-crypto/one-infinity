@@ -210,7 +210,7 @@ export default function PaymentEntries({ staff, isAdmin: isAdminProp, verifyOnly
           <p className="text-sm text-slate-400 dark:text-slate-500">No {filter === "All" ? "" : filter.toLowerCase() + " "}entries.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm text-slate-800 dark:text-slate-100">
               <thead>
                 <tr className="text-left text-xs text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
                   <th className="py-2 pr-3">Date</th>
