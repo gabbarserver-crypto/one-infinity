@@ -53,6 +53,10 @@ function Cell({ value }) {
   );
 }
 
+const COL_KEYS = ["question", "option1", "option2", "option3", "option4"];
+const COL_LABELS = { question: "Question", option1: "Option 1", option2: "Option 2", option3: "Option 3", option4: "Option 4" };
+const EMPTY_COL_SEARCH = { question: "", option1: "", option2: "", option3: "", option4: "" };
+
 const EMPTY_FORM = { question: "", option1: "", option2: "", option3: "", option4: "", answer: "1", chapter: "" };
 
 export default function QuestionBank({ isAdmin = false, staff } = {}) {
@@ -60,6 +64,7 @@ export default function QuestionBank({ isAdmin = false, staff } = {}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [colSearch, setColSearch] = useState(EMPTY_COL_SEARCH); // per-column filters in the table header
   const [page, setPage] = useState(1);
   const [toast, setToast] = useState(null);
   const [activeId, setActiveId] = useState(null); // safe mode: row whose Edit/Delete buttons are showing
@@ -89,15 +94,18 @@ export default function QuestionBank({ isAdmin = false, staff } = {}) {
   };
   useEffect(() => { load(); }, []);
 
+  const anyColFilter = COL_KEYS.some((k) => colSearch[k].trim());
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
+    const cols = COL_KEYS.map((k) => [k, colSearch[k].trim().toLowerCase()]).filter(([, v]) => v);
+    if (!q && !cols.length) return rows;
     return rows.filter((r) =>
-      [r.question, r.option1, r.option2, r.option3, r.option4].some((c) => searchText(c).includes(q))
+      (!q || [r.question, r.option1, r.option2, r.option3, r.option4].some((c) => searchText(c).includes(q))) &&
+      cols.every(([k, v]) => searchText(r[k]).includes(v))
     );
-  }, [rows, search]);
+  }, [rows, search, colSearch]);
 
-  useEffect(() => { setPage(1); setActiveId(null); }, [search]);
+  useEffect(() => { setPage(1); setActiveId(null); }, [search, colSearch]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
@@ -206,6 +214,26 @@ export default function QuestionBank({ isAdmin = false, staff } = {}) {
                 <th className="text-left font-medium px-3 py-2">Option 4</th>
                 <th className="text-left font-medium px-3 py-2">Answer</th>
                 {canWrite && <th className="text-left font-medium px-3 py-2">Actions</th>}
+              </tr>
+              <tr className="bg-slate-50 dark:bg-slate-800/60">
+                <th className="px-3 pb-2"></th>
+                {COL_KEYS.map((k) => (
+                  <th key={k} className="px-2 pb-2 font-normal">
+                    <input
+                      type="text"
+                      value={colSearch[k]}
+                      onChange={(e) => setColSearch((c) => ({ ...c, [k]: e.target.value }))}
+                      placeholder={`Search ${COL_LABELS[k]}…`}
+                      className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 px-2 py-1 text-xs font-normal focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    />
+                  </th>
+                ))}
+                <th className="px-2 pb-2 font-normal">
+                  {anyColFilter && (
+                    <button onClick={() => setColSearch(EMPTY_COL_SEARCH)} className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline" title="Clear column filters">Clear</button>
+                  )}
+                </th>
+                {canWrite && <th className="px-2 pb-2"></th>}
               </tr>
             </thead>
             <tbody>
@@ -358,7 +386,8 @@ function ImportModal({ onClose, onImported, staff }) {
     setParsing(true);
     try {
       const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array" });
+      // codepage 65001 = UTF-8, otherwise curly quotes in CSV show up as "â€œ"
+      const wb = XLSX.read(buf, { type: "array", codepage: 65001 });
       const ws = wb.Sheets[wb.SheetNames[0]];
       // header: 1 -> array of arrays, so we control the header match ourselves
       // (same loose matching as the Applications CSV import) rather than
