@@ -7,6 +7,11 @@
 // Only Admin can add/edit/delete/import (enforced by RLS too, not just this
 // UI) -- everyone else gets a read-only, searchable list, since this is
 // shared reference material rather than per-staff data.
+//
+// SAFE MODE (Admin): Edit / Delete buttons are hidden by default so a stray
+// click can't delete a question. Click a row to reveal that row's Edit and
+// Delete buttons; click the row again (or another row, search, change page)
+// to hide them.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { Card, GhostButton, PrimaryButton, Toast, Modal, Field, Select, Input } from "../components/UI";
@@ -40,7 +45,7 @@ function Cell({ value }) {
     <div>
       {text && <div className="whitespace-pre-wrap break-words">{text}</div>}
       {images.map((src, i) => (
-        <a key={i} href={src} target="_blank" rel="noreferrer" className="inline-block mt-1 mr-1" title="Open full-size">
+        <a key={i} href={src} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="inline-block mt-1 mr-1" title="Open full-size">
           <img src={src} alt="" className="h-12 w-auto rounded border border-slate-200 dark:border-slate-700 object-contain bg-white" />
         </a>
       ))}
@@ -57,6 +62,7 @@ export default function QuestionBank({ isAdmin = false, staff } = {}) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [toast, setToast] = useState(null);
+  const [activeId, setActiveId] = useState(null); // safe mode: row whose Edit/Delete buttons are showing
 
   const [editing, setEditing] = useState(null); // null = closed, {} = new row, row = editing that row
   const [form, setForm] = useState(EMPTY_FORM);
@@ -91,10 +97,11 @@ export default function QuestionBank({ isAdmin = false, staff } = {}) {
     );
   }, [rows, search]);
 
-  useEffect(() => { setPage(1); }, [search]);
+  useEffect(() => { setPage(1); setActiveId(null); }, [search]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  useEffect(() => { setActiveId(null); }, [safePage]);
 
   const openAdd = () => { setForm(EMPTY_FORM); setEditing({}); };
   const openEdit = (r) => {
@@ -126,6 +133,7 @@ export default function QuestionBank({ isAdmin = false, staff } = {}) {
     setSaving(false);
     if (err) { setToast("Save failed: " + err.message); return; }
     setEditing(null);
+    setActiveId(null);
     setToast(editing?.id ? "Question updated" : "Question added");
     load();
   };
@@ -135,6 +143,7 @@ export default function QuestionBank({ isAdmin = false, staff } = {}) {
     const { error: err } = await supabase.from("question_bank").delete().eq("id", r.id);
     if (err) { setToast("Delete failed: " + err.message); return; }
     setRows((rs) => rs.filter((x) => x.id !== r.id));
+    setActiveId(null);
     setToast("Question deleted");
   };
 
@@ -166,6 +175,11 @@ export default function QuestionBank({ isAdmin = false, staff } = {}) {
           />
         </div>
         <span className="text-xs text-slate-400 dark:text-slate-500">{filtered.length} question{filtered.length !== 1 ? "s" : ""}</span>
+        {canWrite && (
+          <span className="text-[11px] text-slate-400 dark:text-slate-500">
+            Safe mode: Edit/Delete dekhne ke liye question ki row par click karein
+          </span>
+        )}
       </div>
 
       <Card className="!p-0 overflow-hidden">
@@ -201,7 +215,11 @@ export default function QuestionBank({ isAdmin = false, staff } = {}) {
                 <tr><td colSpan={canWrite ? 8 : 7} className="px-3 py-8 text-center text-slate-400 dark:text-slate-500">No questions found.</td></tr>
               ) : (
                 pageRows.map((r, i) => (
-                  <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800 align-top hover:bg-slate-50/60 dark:hover:bg-slate-800/30">
+                  <tr
+                    key={r.id}
+                    onClick={canWrite ? () => setActiveId((id) => (id === r.id ? null : r.id)) : undefined}
+                    className={`border-t border-slate-100 dark:border-slate-800 align-top hover:bg-slate-50/60 dark:hover:bg-slate-800/30 ${canWrite ? "cursor-pointer" : ""} ${activeId === r.id ? "bg-blue-50/60 dark:bg-blue-950/20" : ""}`}
+                  >
                     <td className="px-3 py-2 text-slate-400 dark:text-slate-500">{(safePage - 1) * PAGE_SIZE + i + 1}</td>
                     <td className="px-3 py-2 text-slate-800 dark:text-slate-100 font-medium"><Cell value={r.question} /></td>
                     {[1, 2, 3, 4].map((n) => (
@@ -214,8 +232,14 @@ export default function QuestionBank({ isAdmin = false, staff } = {}) {
                     </td>
                     {canWrite && (
                       <td className="px-3 py-2 whitespace-nowrap">
-                        <button onClick={() => openEdit(r)} className="text-blue-600 dark:text-blue-400 hover:underline mr-3 inline-flex items-center" title="Edit"><Pencil size={14} /></button>
-                        <button onClick={() => remove(r)} className="text-rose-500 hover:underline inline-flex items-center" title="Delete"><Trash2 size={14} /></button>
+                        {activeId === r.id ? (
+                          <>
+                            <button onClick={(e) => { e.stopPropagation(); openEdit(r); }} className="text-blue-600 dark:text-blue-400 hover:underline mr-3 inline-flex items-center" title="Edit"><Pencil size={14} /></button>
+                            <button onClick={(e) => { e.stopPropagation(); remove(r); }} className="text-rose-500 hover:underline inline-flex items-center" title="Delete"><Trash2 size={14} /></button>
+                          </>
+                        ) : (
+                          <span className="text-slate-300 dark:text-slate-600 select-none" title="Click the row to show Edit / Delete">•••</span>
+                        )}
                       </td>
                     )}
                   </tr>
