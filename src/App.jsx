@@ -13,6 +13,7 @@ import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import Applications, { StaffApplications, StaffDraftApplications, DraftApplications } from "./pages/Applications";
 import PccApplications from "./pages/PccApplications";
+import QuestionBank from "./pages/QuestionBank";
 import { LearningApplications, DlApplications, fetchUpcomingSlotCount } from "./pages/LicenceApplications";
 import Ledger from "./pages/Ledger";
 import PaymentEntries from "./pages/PaymentEntries";
@@ -68,6 +69,7 @@ const NAV = [
   { key: "staffDraftApplications", label: "Draft", Component: StaffDraftApplications },
   { key: "draftApplications", label: "Draft", Component: DraftApplications },
   { key: "pccApplications", label: "PCC", Component: PccApplications },
+  { key: "questionBank", label: "Question Bank", Component: QuestionBank },
   { key: "learningApplications", label: "Learning", Component: LearningApplications },
   { key: "dlApplications", label: "DL", Component: DlApplications },
   { key: "chats", label: "Call/Chat", Component: Chats },
@@ -101,6 +103,7 @@ const MODULE_BY_NAV_KEY = {
   // Staff View (see visibleNav below). Read-only, so this module is only used
   // for the edit/approve flags, which the page ignores.
   pccApplications: "applications",
+  questionBank: "questionBank",
   // Same rule as PCC: read-only lists for anyone who can view Applications
   // or the restricted Staff View.
   learningApplications: "applications",
