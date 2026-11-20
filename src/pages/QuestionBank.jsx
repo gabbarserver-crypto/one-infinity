@@ -110,7 +110,7 @@ export default function QuestionBank({ isAdmin = false, staff } = {}) {
   const save = async () => {
     const q = form.question.trim();
     const o1 = form.option1.trim(), o2 = form.option2.trim(), o3 = form.option3.trim(), o4 = form.option4.trim();
-    if (!q || !o1 || !o2 || !o3 || !o4) { setToast("Question aur chaaron option bharna zaroori hai"); return; }
+    if (!q || !o1 || !o2 || !o3) { setToast("Question aur kam se kam 3 option bharna zaroori hai"); return; }
     setSaving(true);
     const payload = {
       question: q, option1: o1, option2: o2, option3: o3, option4: o4,
@@ -349,7 +349,8 @@ function ImportModal({ onClose, onImported, staff }) {
         const answer = resolveAnswer(row);
         const errors = [];
         if (!row.question) errors.push("Question khali hai");
-        if (!row.option1 || !row.option2 || !row.option3 || !row.option4) errors.push("Ek ya zyada option khali hain");
+        if (!row.option1 || !row.option2 || !row.option3) errors.push("Option 1-3 me se koi khali hai");
+        if (answer && !row[`option${answer}`]) errors.push("Answer wale option ka text khali hai");
         if (!answer) errors.push("Answer 1-4 me samajh nahi aaya");
         const srNoRaw = row.qno || row.sno;
         return {
