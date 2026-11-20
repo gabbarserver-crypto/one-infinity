@@ -205,7 +205,7 @@ export default function QuestionBank({ isAdmin = false, staff } = {}) {
                     <td className="px-3 py-2 text-slate-400 dark:text-slate-500">{(safePage - 1) * PAGE_SIZE + i + 1}</td>
                     <td className="px-3 py-2 text-slate-800 dark:text-slate-100 font-medium"><Cell value={r.question} /></td>
                     {[1, 2, 3, 4].map((n) => (
-                      <td key={n} className={`px-3 py-2 align-top ${r.answer === n ? "bg-emerald-50/70 dark:bg-emerald-950/20" : ""}`}>
+                      <td key={n} className={`px-3 py-2 align-top text-slate-700 dark:text-slate-200 ${r.answer === n ? "bg-emerald-50/70 dark:bg-emerald-950/20" : ""}`}>
                         <Cell value={r[`option${n}`]} />
                       </td>
                     ))}
