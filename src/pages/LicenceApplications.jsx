@@ -315,8 +315,26 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
   const bucketOfRow = (r) => bucketOf(r, isDl, today, noSlotRtoIds);
 
   // Waiting for RTO Approval rows: LL/DL No. can be typed right here.
+  // Learning page: LL No. can be typed in any row while it is still blank.
   const canEditLlDl = (r) =>
-    isDl && canEdit && bucketOf(r, isDl, today, noSlotRtoIds) === "approval" && !String(r.ll_dl_no || "").trim();
+    canEdit && !String(r.ll_dl_no || "").trim() &&
+    (isDl ? bucketOf(r, isDl, today, noSlotRtoIds) === "approval" : true);
+  // Learning page: RTO Fee can be typed while it is still blank (0 counts as filled).
+  const feeBlank = (r) => r.rto_fee === null || r.rto_fee === undefined || r.rto_fee === "";
+  const canEditFee = (r) => !isDl && canEdit && feeBlank(r);
+  const saveFee = async (r, raw) => {
+    const t = String(raw || "").trim();
+    if (t === "") return;
+    const n = parseFloat(t);
+    if (!Number.isFinite(n) || n < 0) { setToast("RTO Fee sahi number me likhein"); return; }
+    const fields = { rto_fee: n };
+    if (staff?.id) {
+      fields.fee_entered_by = staff.id;
+      fields.fee_entered_at = new Date().toISOString();
+    }
+    const ok = await saveRtoSlot(r.id, fields);
+    if (ok) setToast("RTO Fee saved");
+  };
   const saveLlDl = async (r, raw) => {
     const t = String(raw || "").trim();
     if (!t) return;
@@ -331,11 +349,11 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
     // application (posts it to the dealer ledger).
     if (r.status === "Accepted") {
       const { error: cErr } = await supabase.rpc("complete_application", { p_application_id: r.id });
-      if (cErr) { setToast("DL No. saved, but auto-complete failed: " + cErr.message); return; }
+      if (cErr) { setToast((isDl ? "DL No." : "Learning No.") + " saved, but auto-complete failed: " + cErr.message); return; }
       setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, status: "Completed" } : x)));
-      setToast("DL No. saved — application completed");
+      setToast((isDl ? "DL No." : "Learning No.") + " saved — application completed");
     } else {
-      setToast("DL No. saved");
+      setToast((isDl ? "DL No." : "Learning No.") + " saved");
     }
   };
   const countFor = (key) => (key === "" ? rows.length : rows.filter((r) => bucketOfRow(r) === key).length);
@@ -424,11 +442,11 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
 
   const exportExcel = () => {
     const head = [
-      "Draft ID", "Date", ...(showAmount ? ["Amount"] : []), "Dealer", "Service", "Applicant",
+      ...(isDl ? ["Draft ID"] : []), "Date", ...(showAmount ? ["Amount"] : []), "Dealer", "Service", "Applicant",
       "Application", "RTO Fee", "LL/DL No.", ...(isDl ? ["RTO Name", "Slot Date"] : []), "Status",
     ];
     const body = sorted.map((r) => [
-      r.draft_code || "",
+      ...(isDl ? [r.draft_code || ""] : []),
       isoToDDMMYYYY(rowDateISO(r)),
       ...(showAmount ? [r.amount ?? ""] : []),
       dealerLabel(r.dealers),
@@ -446,7 +464,7 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
     XLSX.writeFile(wb, `${isDl ? "DL" : "Learning"}-${todayIST()}.xlsx`);
   };
 
-  const colCount = 9 + (showAmount ? 1 : 0) + (isDl ? 2 : 0);
+  const colCount = (isDl ? 9 : 8) + (showAmount ? 1 : 0) + (isDl ? 2 : 0);
 
   return (
     <div>
@@ -471,7 +489,7 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search draft ID, name, application, LL/DL No…"
+          placeholder={isDl ? "Search draft ID, name, application, LL/DL No…" : "Search name, application, LL No…"}
           className="flex-1 min-w-[220px] max-w-md rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
         />
         <GhostButton onClick={exportExcel} disabled={loading || sorted.length === 0} className="!px-3 !py-2 !text-xs inline-flex items-center gap-1.5">
@@ -485,7 +503,7 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/60 text-xs text-slate-500 dark:text-slate-400">
-                {th("draft", "Draft ID")}
+                {isDl && th("draft", "Draft ID")}
                 {th("date", "Date")}
                 {showAmount && th("amount", "Amount")}
                 {th("dealer", "Dealer")}
@@ -509,7 +527,7 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
                   const bucket = bucketOfRow(r);
                   return (
                     <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50/60 dark:hover:bg-slate-800/30">
-                      <td className="px-3 py-2 whitespace-nowrap font-semibold text-blue-600 dark:text-blue-400">{r.draft_code}</td>
+                      {isDl && <td className="px-3 py-2 whitespace-nowrap font-semibold text-blue-600 dark:text-blue-400">{r.draft_code}</td>}
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{isoToDDMMYYYY(rowDateISO(r))}</td>
                       {showAmount && <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{r.amount ?? ""}</td>}
                       <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{dealerLabel(r.dealers)}</td>
@@ -538,12 +556,24 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
                           </button>
                         ) : ""}
                       </td>
-                      <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{r.rto_fee ?? ""}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">
+                        {canEditFee(r) ? (
+                          <input
+                            type="number"
+                            min="0"
+                            inputMode="decimal"
+                            placeholder="Fee"
+                            onBlur={(e) => saveFee(r, e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                            className="w-24 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 px-2 py-1 text-sm"
+                          />
+                        ) : (r.rto_fee ?? "")}
+                      </td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         {canEditLlDl(r) ? (
                           <input
                             type="text"
-                            placeholder="DL No."
+                            placeholder={isDl ? "DL No." : "LL No."}
                             onBlur={(e) => saveLlDl(r, e.target.value)}
                             onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
                             className="w-40 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 px-2 py-1 text-sm"
