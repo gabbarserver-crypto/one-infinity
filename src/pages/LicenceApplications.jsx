@@ -152,7 +152,7 @@ function SortTh({ column, label, sortKey, sortDir, onSort }) {
 }
 
 const SELECT_COLS =
-  "id, draft_code, date_of_birth, application_date, submitted_at, amount, rto_fee, status, applicant_name, application_no, ll_dl_no, slot_time, remarks, rto_id, service_id, pcc_no, pcc_status, pcc_stage, pcc_timeline, pcc_not_required, dealers(name,code,short_name), services(parent_service,short_name,pcc_required,ll_dl_no_required,slot_booking_required)";
+  "id, draft_code, dealer_id, completed_at, date_of_birth, application_date, submitted_at, amount, rto_fee, status, applicant_name, application_no, ll_dl_no, slot_time, remarks, rto_id, service_id, pcc_no, pcc_status, pcc_stage, pcc_timeline, pcc_not_required, dealers(name,code,short_name), services(parent_service,short_name,pcc_required,ll_dl_no_required,slot_booking_required)";
 
 // Same stored-file link the Applications page uses: keep the public URL but
 // ask the browser to save it as "application.<ext>".
@@ -322,6 +322,42 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
   // Learning page: RTO Fee can be typed while it is still blank (0 counts as filled).
   const feeBlank = (r) => r.rto_fee === null || r.rto_fee === undefined || r.rto_fee === "";
   const canEditFee = (r) => !isDl && canEdit && feeBlank(r);
+  // Learning page: Amount can be typed while it is still blank/0, only where
+  // the Amount column is visible (Admin / full Applications access).
+  const canEditAmount = (r) => !isDl && canEdit && showAmount && !amountFilled(r);
+  // Same flow as the Applications page: save Amount, treat it as approval
+  // (Accepted) and post it to the dealer's ledger.
+  const saveAmount = async (r, raw) => {
+    const t = String(raw || "").trim();
+    if (t === "") return;
+    const n = parseFloat(t);
+    if (!Number.isFinite(n) || n <= 0) { setToast("Amount sahi number me likhein"); return; }
+    const fields = { amount: n };
+    if (staff?.id) {
+      fields.amount_entered_by = staff.id;
+      fields.amount_entered_at = new Date().toISOString();
+    }
+    const ok = await saveRtoSlot(r.id, fields);
+    if (!ok) return;
+    let accepted = false;
+    if (!["Accepted", "Completed", "Rejected"].includes(r.status)) {
+      const patch = { status: "Accepted", application_date: r.application_date || todayIST() };
+      if (!r.completed_at) patch.completed_at = new Date().toISOString();
+      const { data: up, error: aErr } = await supabase
+        .from("applications").update(patch).eq("id", r.id).neq("status", "Accepted").select("id");
+      if (!aErr && up && up.length) {
+        accepted = true;
+        setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, ...patch } : x)));
+      }
+    }
+    if (!r.dealer_id) {
+      setToast("Amount saved (no dealer selected yet, so nothing posted to ledger)");
+      return;
+    }
+    const { error: lErr } = await supabase.rpc("upsert_ledger_entry_for_amount", { p_application_id: r.id });
+    if (lErr) { setToast("Amount saved, but ledger update failed: " + lErr.message); return; }
+    setToast(`Amount saved${accepted ? " & Accepted" : ""} — ₹${n.toLocaleString("en-IN")} posted to ${r.dealers?.name || "dealer"}'s ledger`);
+  };
   const saveFee = async (r, raw) => {
     const t = String(raw || "").trim();
     if (t === "") return;
@@ -529,7 +565,21 @@ function LicenceList({ kind, isAdmin = false, visibleNav = [], canEdit = true, s
                     <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50/60 dark:hover:bg-slate-800/30">
                       {isDl && <td className="px-3 py-2 whitespace-nowrap font-semibold text-blue-600 dark:text-blue-400">{r.draft_code}</td>}
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{isoToDDMMYYYY(rowDateISO(r))}</td>
-                      {showAmount && <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{r.amount ?? ""}</td>}
+                      {showAmount && (
+                        <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">
+                          {canEditAmount(r) ? (
+                            <input
+                              type="number"
+                              min="0"
+                              inputMode="decimal"
+                              placeholder="Amount"
+                              onBlur={(e) => saveAmount(r, e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                              className="w-24 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 px-2 py-1 text-sm"
+                            />
+                          ) : (r.amount ?? "")}
+                        </td>
+                      )}
                       <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{dealerLabel(r.dealers)}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{serviceLabel(r.services)}</td>
                       <td className="px-3 py-2 whitespace-nowrap font-semibold text-slate-800 dark:text-slate-100">
