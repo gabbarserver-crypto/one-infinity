@@ -13,6 +13,7 @@
 // required path. This panel is only about *how the dealer receives the QR*,
 // not how the payment itself gets recorded.
 import React, { useEffect, useRef, useState } from "react";
+import QRCode from "qrcode";
 import { supabase } from "../lib/supabase";
 import { createPaymentQr, sendPush } from "../lib/serverApi";
 import { getOrCreateThread, sendMessage, identityFor } from "../lib/chat";
@@ -70,6 +71,7 @@ export default function StaffQrSendPanel({ staff, dealers, onClose }) {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [toast, setToast] = useState(null);
   const pollRef = useRef(null);
+  const [qrFailed, setQrFailed] = useState(false);
   const [localQr, setLocalQr] = useState(""); // QR drawn here from the UPI link when Cashfree sent no image
 
   useEffect(() => {
@@ -135,16 +137,19 @@ export default function StaffQrSendPanel({ staff, dealers, onClose }) {
   // so staff always has a QR to show/copy/share.
   useEffect(() => {
     setLocalQr("");
+    setQrFailed(false);
     if (!qr || qr.qrImageUrl) return;
     const source = qr.qrRawString || payLink;
     if (!source) return;
     let cancelled = false;
     (async () => {
       try {
-        const QRCode = (await import("qrcode")).default;
         const url = await QRCode.toDataURL(source, { margin: 1, width: 480 });
         if (!cancelled) setLocalQr(url);
-      } catch { /* leave empty */ }
+      } catch (err) {
+        console.error("QR draw failed:", err);
+        if (!cancelled) setQrFailed(true);
+      }
     })();
     return () => { cancelled = true; };
   }, [qr, payLink]);
@@ -300,7 +305,15 @@ export default function StaffQrSendPanel({ staff, dealers, onClose }) {
               )}
             </>
           ) : payLink ? (
-            <p className="text-xs text-slate-400 dark:text-slate-500">Preparing QR…</p>
+            <div className="space-y-2">
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                {qrFailed ? "QR image couldn't be drawn here — share this payment link instead." : "Preparing QR…"}
+              </p>
+              <div className="flex gap-2">
+                <GhostButton onClick={() => copyLink(payLink)} className="flex-1">Copy payment link</GhostButton>
+                <PrimaryButton onClick={() => window.open(`https://wa.me/${waNumber(dealerMobile)}?text=${encodeURIComponent(shareText)}`, "_blank", "noopener")} className="flex-1">WhatsApp</PrimaryButton>
+              </div>
+            </div>
           ) : (
             <p className="text-xs text-slate-400 dark:text-slate-500">
               No QR could be generated for this order — {dealerName} still got a "Pay Now" button in chat.
